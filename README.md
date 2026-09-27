@@ -17,6 +17,14 @@ A study-level flight computer for **X-Plane 12**. It reads the sim live, detects
 
 No X-Plane running? Press **Run the demo flight** to try everything with simulated data.
 
+## Quick start (Linux)
+
+1. Python 3 is usually installed already (`python3 --version`). If not: `sudo pacman -S python` (Arch) or `sudo apt install python3` (Debian/Ubuntu).
+2. In the project folder run **`sh start.sh`** (or `python3 xpfc.py`). Open **http://127.0.0.1:8765** if the browser does not open by itself.
+3. Start X-Plane 12 and load an aircraft. Native Linux X-Plane and Steam installs (including Flatpak Steam) are found automatically for runway data.
+
+macOS works the same way with `sh start.sh`.
+
 ## How it connects to X-Plane
 
 The app picks the best link on its own:
@@ -31,7 +39,7 @@ The app picks the best link on its own:
 
 ## Phone or tablet as a second screen
 
-Run **`start_lan.bat`**. The console prints an address like `http://192.168.1.20:8765` — open it on a device on the same Wi-Fi. Allow Python through Windows Firewall for *private* networks when asked.
+Run **`start_lan.bat`** (Linux: `sh start.sh --lan`). The console prints an address like `http://192.168.1.20:8765` — open it on a device on the same Wi-Fi. On Windows, allow Python through the firewall for *private* networks when asked.
 
 ## Runway data
 

@@ -9,7 +9,7 @@ Standard library only (Python 3.8+). Two ways to talk to X-Plane, chosen automat
   * UDP "RREF" (any X-Plane, same PC or LAN, port 49000) - needs
     Settings > Network > "Accept incoming connections" in X-Plane 12.
 
-Run:  python xpfc.py            then open http://127.0.0.1:8765
+Run:  python xpfc.py   (Linux: sh start.sh)   then open http://127.0.0.1:8765
       python xpfc.py --lan      to use a phone/tablet on the same network
       python xpfc.py --help     for all options
 """
@@ -819,6 +819,7 @@ def find_xp_roots():
                 pass
     steam_roots = [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam",
                    os.path.expanduser("~/.steam/steam"), os.path.expanduser("~/.local/share/Steam"),
+                   os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.local/share/Steam"),   # Flatpak Steam
                    os.path.expanduser("~/Library/Application Support/Steam")]
     libs = []
     for sr in steam_roots:
