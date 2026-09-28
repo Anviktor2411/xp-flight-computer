@@ -42,6 +42,13 @@
   }
   const range = (a, b, s) => { const o = []; for (let v = a; v <= b + 1e-9; v += s) o.push(+v.toFixed(6)); return o; };
   const kft = v => (v === 0 ? '0' : (v / 1000) + 'k');
+  /** Break a label into lines of at most n characters (SVG text does not wrap). */
+  const wrap = (s, n) => {
+    const out = []; let cur = '';
+    for (const w of String(s).split(' ')) { if ((cur + ' ' + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
+    if (cur) out.push(cur);
+    return out;
+  };
 
   const airlinerSide = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})">
       <path d="M-128 -9 H98 Q126 -5 130 0 Q126 6 98 9 H-122 Q-134 7 -136 0 Q-134 -7 -128 -9 Z" class="f-soft s-line"/>
@@ -476,6 +483,374 @@
        <circle cx="${f(fr.X(15))}" cy="${f(fr.Y(100))}" r="5" class="f-live"/>${text(f(fr.X(15)), f(fr.Y(100) - 10), 'OAT 15 °C: full thrust', 't-live', 'middle')}
        <circle cx="${f(fr.X(tf))}" cy="${f(fr.Y(need))}" r="5" class="f-acc"/>${text(f(fr.X(tf) + 8), f(fr.Y(need) - 8), 'assumed ' + tf.toFixed(0) + ' °C', 't-acc')}
        ${text(f(fr.X(31)), f(fr.Y(101.5)), 'flat-rated to 30 °C', 't-sel')}`);
+  };
+
+  // ================================================================ MORE TOPICS
+  /** Drag model of a 65 t narrow-body (CD0 0.022, aspect ratio 9.45, e 0.8) at sea level, EAS. */
+  const JET = { W: 65000 * 9.80665, S: 124.6, cd0: 0.022, k: 1 / (Math.PI * 9.45 * 0.8) };
+  F.jetDrag = v => {
+    const q = 0.5 * 1.225 * Math.pow(v * 0.514444, 2), cl = JET.W / (q * JET.S);
+    return { para: q * JET.S * JET.cd0 / 1000, ind: q * JET.S * JET.k * cl * cl / 1000 };
+  };
+  F.jetVmd = () => Math.sqrt(2 * JET.W / (1.225 * JET.S) * Math.sqrt(JET.k / JET.cd0)) / 0.514444;
+
+  // ---------------------------------------------------------------- 1.6 drag curve
+  F.dragCurve = () => {
+    const fr = frame(640, 300, { l: 56, r: 24, t: 16, b: 40 }, { min: 120, max: 400, ticks: range(120, 400, 40), label: 'Equivalent airspeed (kt) — 65 t narrow-body' },
+      { min: 0, max: 80, ticks: range(0, 80, 20), label: 'Drag (kN)' });
+    const vs = range(120, 400, 4);
+    const pts = k => vs.map(v => { const d = F.jetDrag(v); return [v, k === 'tot' ? d.para + d.ind : d[k]]; }).filter(p => p[1] <= 82);
+    const vmd = F.jetVmd(), dmd = F.jetDrag(vmd), vr = vmd * Math.pow(3, 0.25);
+    return svg(640, 300, 'Drag against speed: parasite, induced and total', id => fr.grid +
+      `<rect x="${fr.X(120)}" y="16" width="${f(fr.X(vmd) - fr.X(120))}" height="244" class="fa-warn"/>
+       <path d="${fr.path(pts('para'))}" class="s-sel nf"/><path d="${fr.path(pts('ind'))}" class="s-live nf"/><path d="${fr.path(pts('tot'))}" class="s-acc nf" style="stroke-width:3.4"/>
+       ${line(f(fr.X(vmd)), f(fr.Y(dmd.para + dmd.ind)), f(fr.X(vmd)), 260, 's-dash')}<circle cx="${f(fr.X(vmd))}" cy="${f(fr.Y(dmd.para + dmd.ind))}" r="5" class="f-acc"/>
+       ${text(f(fr.X(vmd)), f(fr.Y(dmd.para + dmd.ind) + 22), 'Vmd ' + Math.round(vmd) + ' kt · best L/D', 't-acc', 'middle')}
+       ${line(f(fr.X(vr)), 150, f(fr.X(vr)), 260, 's-dash')}${text(f(fr.X(vr) + 6), 160, '1.32 Vmd ≈ ' + Math.round(vr) + ' kt', 't')}${text(f(fr.X(vr) + 6), 176, 'best range (jet)', 't')}
+       <g transform="translate(${f(fr.X(232))} ${f(fr.Y(78))})"><rect x="-10" y="-14" width="178" height="62" rx="6" class="f-surface s-thin"/>
+         ${line(0, 0, 24, 0, 's-acc')}${text(32, 4, 'total drag', 't-acc')}${line(0, 18, 24, 18, 's-sel')}${text(32, 22, 'parasite ∝ V²', 't-sel')}${line(0, 36, 24, 36, 's-live')}${text(32, 40, 'induced ∝ 1/V²', 't-live')}</g>
+       ${text(fr.X(124), fr.Y(75), 'slower than Vmd:', 't-warn')}${text(fr.X(124), fr.Y(70.5), 'speed unstable', 't-warn')}`);
+  };
+
+  // ---------------------------------------------------------------- 1.7 climb: Vx and Vy
+  F.climbModel = () => {
+    const g = 9.80665, W = 1157 * g, S = 16.2, cd0 = 0.031, k = 1 / (Math.PI * 7.32 * 0.72), Pw = 128000;
+    const eta = V => 0.82 * (1 - Math.exp(-V / 28));
+    const pts = [];
+    for (let kt = 50; kt <= 125; kt += 0.5) {
+      const V = kt * 0.514444, q = 0.5 * 1.225 * V * V, cl = W / (q * S), D = q * S * (cd0 + k * cl * cl), T = eta(V) * Pw / V;
+      pts.push({ kt, angle: Math.asin(Math.max(-1, Math.min(1, (T - D) / W))) * 180 / Math.PI, roc: (T - D) * V / W * 196.85 });
+    }
+    const vx = pts.reduce((a, b) => (b.angle > a.angle ? b : a)), vy = pts.reduce((a, b) => (b.roc > a.roc ? b : a));
+    return { pts, vx, vy };
+  };
+  F.climb = () => {
+    const m = F.climbModel();
+    const fr = frame(640, 300, { l: 56, r: 56, t: 16, b: 40 }, { min: 50, max: 125, ticks: range(50, 125, 10), label: 'Indicated airspeed (kt) — light single, sea level, maximum weight' },
+      { min: 0, max: 900, ticks: range(0, 900, 150), label: 'Rate of climb (fpm)' });
+    const aY = a => fr.Y(a / 6 * 900);
+    const angPath = m.pts.map((p, i) => (i ? 'L' : 'M') + f(fr.X(p.kt)) + ' ' + f(aY(p.angle))).join(' ');
+    let right = '';
+    for (let a = 0; a <= 6; a += 1) right += text(f(fr.X(125) + 8), f(aY(a) + 4), a + '°', 't tm');
+    return svg(640, 300, 'Climb angle and rate of climb against speed', id => fr.grid + right +
+      `<path d="${fr.path(m.pts.map(p => [p.kt, p.roc]))}" class="s-acc nf"/><path d="${angPath}" class="s-sel nf" stroke-dasharray="7 5"/>
+       <circle cx="${f(fr.X(m.vx.kt))}" cy="${f(aY(m.vx.angle))}" r="5" class="f-sel"/>${text(f(fr.X(m.vx.kt)), f(aY(m.vx.angle) - 9), 'Vx', 't-sel', 'middle')}
+       <circle cx="${f(fr.X(m.vy.kt))}" cy="${f(fr.Y(m.vy.roc))}" r="5" class="f-acc"/>${text(f(fr.X(m.vy.kt)), f(fr.Y(m.vy.roc) + 20), 'Vy', 't-acc', 'middle')}
+       ${line(f(fr.X(m.vx.kt)), f(aY(m.vx.angle)), f(fr.X(m.vx.kt)), 260, 's-dash')}${line(f(fr.X(m.vy.kt)), f(fr.Y(m.vy.roc) + 26), f(fr.X(m.vy.kt)), 260, 's-dash')}
+       <g transform="translate(${f(fr.X(80))} ${f(fr.Y(260))})"><rect x="-8" y="-16" width="232" height="46" rx="6" class="f-surface s-thin"/>
+         ${text(0, 0, 'Vx ' + Math.round(m.vx.kt) + ' kt — steepest, ' + m.vx.angle.toFixed(1) + '°', 't-sel')}${text(0, 20, 'Vy ' + Math.round(m.vy.kt) + ' kt — fastest, ' + Math.round(m.vy.roc) + ' fpm', 't-acc')}</g>
+       ${text(f(fr.X(125) + 46), f((16 + 260) / 2), 'Climb angle', 't-sel', 'middle', `transform="rotate(90 ${f(fr.X(125) + 46)} ${f((16 + 260) / 2)})"`)}
+       ${text(fr.X(124), fr.Y(20), 'solid: rate · dashed: angle', 't', 'end')}`);
+  };
+
+  // ---------------------------------------------------------------- 1.8 stability & CG
+  F.stability = () => svg(640, 290, 'Longitudinal balance: lift, weight, tail load and the static margin', id => {
+    const y = 138;
+    return `<path d="M58 ${y} Q70 ${y - 16} 110 ${y - 18} H520 L560 ${y - 44} H584 L578 ${y - 6} Q540 ${y + 10} 500 ${y + 12} H110 Q66 ${y + 12} 58 ${y} Z" class="f-soft s-line"/>
+      <path d="M190 ${y + 4} L330 ${y + 4} L318 ${y + 13} L196 ${y + 13} Z" class="f-line"/>
+      <path d="M520 ${y - 8} L596 ${y - 8} L592 ${y - 2} L524 ${y - 2} Z" class="f-line"/>
+      ${text(229, y + 94, 'CG range', 't-sel', 'middle')}<rect x="202" y="${y + 102}" width="54" height="12" class="fa-sel"/>
+      ${line(202, y + 98, 202, y + 118, 's-sel')}${line(256, y + 98, 256, y + 118, 's-sel')}${text(198, y + 134, 'forward limit', 't', 'end')}${text(260, y + 134, 'aft limit', 't')}
+      ${arrow(id, 262, y - 4, 262, 44, 'acc')}${text(314, 58, 'Wing lift at the', 't-acc')}${text(314, 74, 'aerodynamic centre', 't-acc')}
+      ${arrow(id, 232, y + 20, 232, y + 72, 'bad')}<circle cx="232" cy="${y + 6}" r="7" class="f-surface s-line"/><path d="M232 ${y - 1} A7 7 0 0 1 239 ${y + 6} H232 Z M232 ${y + 13} A7 7 0 0 1 225 ${y + 6} H232 Z" class="f-line"/>
+      ${text(222, y + 58, 'Weight', 't-bad', 'end')}${text(222, y + 74, 'at the CG', 't-bad', 'end')}
+      ${arrow(id, 558, y - 12, 558, y + 44, 'warn')}${text(548, y + 40, 'tail down-load', 't-warn', 'end')}
+      <path d="M298 ${y - 10} l6 -10 l6 10 z" class="f-live"/>${text(312, y - 14, 'neutral point', 't-live')}
+      ${dbl(id, 232, 26, 304, 26, 'live')}${text(268, 18, 'static margin', 't-live', 'middle')}${line(232, 30, 232, y - 8, 's-dash')}${line(304, 30, 304, y - 22, 's-dash')}
+      ${text(620, 206, 'CG ahead of the neutral point = stable:', 'tb', 'end')}${text(620, 224, 'a gust that lifts the nose makes', 't', 'end')}${text(620, 240, 'a nose-down moment.', 't', 'end')}
+      ${text(620, 262, 'Forward CG: heavier, higher stall speed.', 't', 'end')}${text(620, 280, 'Aft CG: lighter, less stable.', 't', 'end')}`;
+  });
+
+  // ---------------------------------------------------------------- 4.6 true / magnetic / compass
+  F.northArrows = () => svg(640, 300, 'True, magnetic and compass north with variation and deviation', id => {
+    const O = [150, 262], L = 206;
+    const aM = 26, aC = 40, aH = 74;                  // drawn angles (exaggerated): VAR 8° E, DEV 3° E, heading 070° T
+    const P = (b, r) => brg(O[0], O[1], b, r);
+    const tN = P(0, L), mN = P(aM, L - 6), cN = P(aC, L - 18), h = P(aH, L - 10);
+    const lab = (b, r) => P(b, r).map(v => f(v));
+    return `${arrow(id, O[0], O[1], f(tN[0]), f(tN[1]), 'line')}${text(f(tN[0]), f(tN[1] - 8), 'True north', 'tb', 'middle')}
+      ${arrow(id, O[0], O[1], f(mN[0]), f(mN[1]), 'sel')}${text(f(mN[0] + 8), f(mN[1] + 4), 'Magnetic north', 't-sel')}
+      ${arrow(id, O[0], O[1], f(cN[0]), f(cN[1]), 'warn')}${text(f(cN[0] + 8), f(cN[1] + 8), 'Compass north', 't-warn')}
+      ${arrow(id, O[0], O[1], f(h[0]), f(h[1]), 'acc')}${text(f(h[0] - 6), f(h[1] + 22), 'Heading 070°T', 't-acc', 'end')}
+      <path d="${arcPath(O[0], O[1], 96, -90, -90 + aM)}" class="s-sel nf"/>${text(...lab(aM / 2, 108), 'VAR 8°E', 't-sel', 'middle')}
+      <path d="${arcPath(O[0], O[1], 150, -90 + aM, -90 + aC)}" class="s-warn nf"/>${text(...lab(aC + 4, 150), 'DEV 3°E', 't-warn')}
+      <circle cx="${O[0]}" cy="${O[1]}" r="4" class="f-line"/>${text(O[0] - 10, O[1] + 4, 'angles exaggerated', 't', 'end')}
+      <g transform="translate(372 50)">${text(0, 0, 'From true to compass', 'tb')}
+        ${[['TRUE', '070°', 'line'], ['− VAR 8°E', '', 'sel'], ['MAGNETIC', '062°', 'sel'], ['− DEV 3°E', '', 'warn'], ['COMPASS', '059°', 'warn']].map(([a, b, c], i) =>
+          (b ? `<rect x="0" y="${14 + i * 30}" width="240" height="26" rx="6" class="f-surface s-thin"/>${text(12, 32 + i * 30, a, 't')}${text(228, 32 + i * 30, b, c === 'line' ? 'tb' : 't-' + c, 'end')}` : text(24, 33 + i * 30, a, 't-' + c))).join('')}
+        ${text(0, 186, 'East is least, west is best:', 'tb')}${text(0, 204, 'subtract easterly variation and', 't')}${text(0, 222, 'deviation going towards compass,', 't')}${text(0, 240, 'add westerly.', 't')}</g>`;
+  });
+
+  // ---------------------------------------------------------------- 4.7 VOR / DME
+  F.vorDme = () => svg(640, 300, 'VOR radials and DME slant range', id => {
+    const O = [150, 150], R = 112;
+    let rose = '';
+    for (let b = 0; b < 360; b += 10) { const [x0, y0] = brg(O[0], O[1], b, R), [x1, y1] = brg(O[0], O[1], b, R - (b % 30 ? 6 : 12)); rose += line(f(x0), f(y0), f(x1), f(y1), 's-thin'); }
+    for (const [b, s] of [[0, '36'], [90, '9'], [180, '18'], [270, '27']]) { const [x, y] = brg(O[0], O[1], b, R - 26); rose += text(f(x), f(y + 5), s, 'tb', 'middle'); }
+    const A = brg(O[0], O[1], 60, 84);
+    return `<circle cx="${O[0]}" cy="${O[1]}" r="${R}" class="f-surface s-line"/>${rose}
+      ${arrow(id, O[0], O[1], ...brg(O[0], O[1], 60, R + 26).map(v => f(v)), 'sel')}${text(252, 70, 'radial 060', 't-sel')}
+      <g transform="translate(${f(A[0])} ${f(A[1])}) rotate(240)"><path d="M0 -12 L4 -2 L14 4 L14 7 L3 4 L2 11 L6 14 L6 16 L0 14 L-6 16 L-6 14 L-2 11 L-3 4 L-14 7 L-14 4 L-4 -2 Z" class="f-acc"/></g>
+      ${text(f(A[0] + 12), f(A[1] + 30), 'inbound 240°', 't-acc')}
+      <path d="M${O[0] - 7} ${O[1]} L${O[0]} ${O[1] - 7} L${O[0] + 7} ${O[1]} L${O[0]} ${O[1] + 7} Z" class="f-line"/>
+      ${text(O[0], 290, 'A radial is the magnetic bearing FROM the station', 't', 'middle')}
+      <g transform="translate(330 0)">
+        <rect x="10" y="236" width="290" height="10" class="f-ground"/>${line(10, 236, 300, 236, 's-line')}
+        <path d="M34 236 l-8 -16 h16 z" class="f-line"/>${text(34, 262, 'DME', 'tb', 'middle')}
+        <g transform="translate(262 70)"><path d="M-16 -2 H12 Q18 0 12 2 H-16 Z M-3 -1 L2 -9 L6 -9 L4 -1 Z" class="f-line"/></g>
+        ${line(34, 220, 262, 74, 's-acc')}${text(128, 136, 'slant range', 't-acc', 'middle', 'transform="rotate(-32 128 136)"')}${text(150, 154, '(what the DME shows)', 't', 'middle', 'transform="rotate(-32 150 154)"')}
+        ${dbl(id, 262, 78, 262, 232, 'sel')}${text(270, 160, 'height', 't-sel')}
+        ${dbl(id, 38, 226, 258, 226, 'live')}${text(150, 220, 'ground distance', 't-live', 'middle')}
+        ${text(10, 30, 'ground = √(DME² − height²)', 'tb')}${text(10, 48, 'height in NM = feet ÷ 6076', 't')}
+        ${text(10, 290, 'Error is small when ≥ 1 NM per 1000 ft of height', 't')}</g>`;
+  });
+
+  // ---------------------------------------------------------------- 4.8 ILS glide path
+  F.ils = () => svg(640, 300, 'ILS glide path heights, decision altitude and markers', id => {
+    const xT = 560, yG = 250, pxNm = 96, pxFt = 0.104;
+    const X = d => xT - d * pxNm, Y = h => yG - h * pxFt;
+    const h = d => 50 + d * 318.4;
+    const pts = [0, 5.25].map(d => `${f(X(d))} ${f(Y(h(d)))}`);
+    const da = (200 - 50) / 318.4;
+    let marks = '';
+    for (let d = 1; d <= 5; d++) marks += `<circle cx="${f(X(d))}" cy="${f(Y(h(d)))}" r="3.5" class="f-acc"/>` + text(f(X(d) + 6), f(Y(h(d)) - 8), d + ' NM · ' + Math.round(h(d)) + ' ft', 't-acc', 'start') + line(f(X(d)), yG, f(X(d)), yG + 6, 's-thin');
+    return `<rect x="20" y="${yG}" width="600" height="18" class="f-ground" rx="3"/>${line(20, yG, 620, yG, 's-line')}
+      <rect x="${xT}" y="${yG - 3}" width="70" height="6" class="f-line"/>${text(xT + 4, yG + 36, 'runway', 't')}
+      <path d="M${pts[0]} L${pts[1]}" class="s-acc nf" style="stroke-width:3"/>${marks}
+      ${line(40, f(Y(200)), 620, f(Y(200)), 's-bad')}${text(44, f(Y(200) - 6), 'DA 200 ft (CAT I)', 't-bad')}
+      <circle cx="${f(X(da))}" cy="${f(Y(200))}" r="4.5" class="f-bad"/>${text(430, f(Y(200) - 8), 'at the DA: land or go around', 't-bad', 'end')}
+      ${line(f(X(4.6)), yG - 30, f(X(4.6)), yG, 's-dash')}${text(f(X(4.6)), yG + 36, 'outer marker ~4–7 NM', 't', 'middle')}
+      ${line(f(X(0.6)), yG - 30, f(X(0.6)), yG, 's-dash')}${text(f(X(0.6) - 10), yG + 36, 'middle marker', 't', 'end')}
+      ${text(620, 24, '3° glide path: height = TCH + 318 ft per NM', 'tb', 'end')}${text(620, 42, 'TCH (threshold crossing height) ≈ 50 ft · vertical scale exaggerated', 't', 'end')}`;
+  });
+
+  // ---------------------------------------------------------------- 5.6 turbofan
+  F.turbofan = () => svg(640, 290, 'High-bypass turbofan cross-section', id => {
+    const cy = 145;
+    const sym = (d, cls) => `<path d="${d}" class="${cls}"/><path d="${d}" class="${cls}" transform="translate(0 ${2 * cy}) scale(1 -1)"/>`;
+    return `${sym(`M60 ${cy - 96} Q70 ${cy - 106} 110 ${cy - 106} H420 Q470 ${cy - 100} 500 ${cy - 84} L500 ${cy - 74} Q460 ${cy - 86} 420 ${cy - 90} H112 Q84 ${cy - 90} 76 ${cy - 82} Z`, 'f-soft s-line')}
+      ${sym(`M140 ${cy - 26} H520 L560 ${cy - 16} L520 ${cy - 22} H140 Z`, 'f-muted')}
+      ${sym(`M150 ${cy - 30} Q160 ${cy - 40} 200 ${cy - 42} H380 L470 ${cy - 30} L560 ${cy - 22} L560 ${cy - 18} L470 ${cy - 26} L380 ${cy - 36} H200 Q170 ${cy - 36} 160 ${cy - 26} Z`, 'f-soft s-line')}
+      <path d="M96 ${cy - 86} L104 ${cy + 86} L112 ${cy + 86} L104 ${cy - 86} Z" class="f-sel"/>${text(104, cy - 116, 'fan (N1)', 't-sel', 'middle')}
+      ${[0, 1, 2].map(i => `<rect x="${168 + i * 10}" y="${cy - 32}" width="4" height="64" class="f-sel"/>`).join('')}${text(186, cy + 50, 'booster', 't', 'middle')}
+      ${[0, 1, 2, 3, 4, 5].map(i => `<rect x="${226 + i * 11}" y="${cy - 30 + i * 3}" width="4" height="${60 - i * 6}" class="f-live"/>`).join('')}${text(254, cy + 68, 'HP compressor (N2)', 't-live', 'middle')}
+      <rect x="298" y="${cy - 30}" width="52" height="60" rx="8" class="f-warn" opacity="0.85"/>${text(324, cy + 50, 'combustor', 't-warn', 'middle')}
+      ${[0, 1].map(i => `<rect x="${360 + i * 11}" y="${cy - 26}" width="4" height="52" class="f-bad"/>`).join('')}
+      ${[0, 1, 2, 3].map(i => `<rect x="${396 + i * 12}" y="${cy - 24}" width="4" height="48" class="f-acc"/>`).join('')}${text(418, cy + 68, 'turbines · EGT', 't-acc', 'middle')}
+      <path d="M470 ${cy - 16} L560 ${cy} L470 ${cy + 16} Z" class="f-muted"/>
+      ${arrow(id, 20, cy - 66, 90, cy - 66, 'sel')}${arrow(id, 440, cy - 66, 540, cy - 66, 'sel')}${text(480, cy - 50, 'cold bypass air', 't-sel', 'middle')}
+      ${arrow(id, 520, cy + 8, 612, cy + 8, 'bad')}${text(612, cy + 30, 'hot core jet', 't-bad', 'end')}
+      ${text(20, 284, 'Bypass ratio = bypass air ÷ core air: about 5 : 1 on a CFM56, 10 : 1 or more on new engines.', 't')}`;
+  });
+
+  // ---------------------------------------------------------------- 5.7 optimum altitude & step climb
+  F.optAlt = () => {
+    const S = 124.6, M = 0.785, cl = 0.52;
+    const opt = m => C.optimumAltitude({ massKg: m * 1000, wingArea: S, mach: M, clOpt: cl }).ft;
+    const fr = frame(640, 300, { l: 60, r: 24, t: 16, b: 40 }, { min: 78, max: 56, ticks: range(56, 78, 4).reverse(), label: 'Mass (tonnes) — falling as fuel burns →' },
+      { min: 30000, max: 42000, ticks: range(30000, 42000, 2000), label: 'Altitude (ft)', fmt: v => 'FL' + v / 100 });
+    const ms = range(56, 78, 0.25).reverse();
+    const optPts = ms.map(m => [m, opt(m)]).filter(p => p[1] <= 42000);
+    let lvl = null, stairs = [];
+    for (const m of ms) {
+      const o = opt(m);
+      const L = Math.floor((o + 2000) / 2000) * 2000 - 1000;     // highest odd level ≤ optimum + 1000 ft
+      if (lvl == null) lvl = Math.min(L, 41000);
+      else if (L > lvl) lvl = Math.min(L, 41000);
+      stairs.push([m, lvl]);
+    }
+    return svg(640, 300, 'Optimum altitude against mass with step climbs', id => fr.grid +
+      `<path d="${fr.path(optPts)}" class="s-acc nf"/><path d="${fr.path(stairs)}" class="s-sel nf" style="stroke-width:3"/>
+       ${text(fr.X(76.5), fr.Y(opt(76.5)) + 22, 'optimum altitude', 't-acc')}${text(fr.X(71), fr.Y(34000) + 22, 'flown: 2000 ft steps', 't-sel')}
+       ${text(fr.X(77.6), fr.Y(41400), '737-800 at M0.785 (CL ≈ 0.52)', 't')}`);
+  };
+
+  // ---------------------------------------------------------------- 6.1 METAR anatomy
+  F.metarFig = () => svg(640, 190, 'The groups of a METAR', id => {
+    const g = [['EETN', 'station', 'line'], ['271420Z', 'day 27, 14:20 UTC', 'line'], ['24012G22KT', 'wind 240° 12 kt, gusts 22', 'sel'], ['9999', 'visibility 10 km+', 'live'],
+      ['-SHRA', 'light rain showers', 'warn'], ['FEW025CB', 'few CB at 2500 ft', 'bad'], ['SCT040', 'scattered 4000 ft', 'warn'], ['12/08', 'temp 12 °C, dew point 8', 'acc'], ['Q1009', 'QNH 1009 hPa', 'acc'], ['NOSIG', 'no change expected', 'line']];
+    let x = 14, out = '';
+    g.forEach(([s, lab, c], i) => {
+      const w = s.length * 8.1 + 10;
+      const cls = c === 'line' ? 'tb' : 't-' + c;
+      out += `<rect x="${f(x)}" y="30" width="${f(w)}" height="30" rx="5" class="f-surface s-thin"/><text x="${f(x + w / 2)}" y="50" text-anchor="middle" class="${cls}" style="font-family:var(--font-mono);font-size:13px">${s}</text>`;
+      const ly = i % 2 ? 132 : 92;
+      out += line(f(x + w / 2), 62, f(x + w / 2), ly - 14, c === 'line' ? 's-thin' : 's-' + c) + wrap(lab, 16).map((t, j) => text(f(x + w / 2), ly + j * 15, t, j ? 't' : cls, 'middle')).join('');
+      x += w + 4;
+    });
+    return out + text(14, 184, 'Heights of cloud are above the aerodrome in hundreds of feet: 025 = 2500 ft. CB = cumulonimbus.', 't');
+  });
+
+  // ---------------------------------------------------------------- 6.2 cloud base & freezing level
+  F.cloudBase = () => {
+    const T0 = 20, Td0 = 12, base = (T0 - Td0) / 2.5 * 1000, Tb = T0 - 2.98 * base / 1000;
+    const fr = frame(640, 300, { l: 60, r: 24, t: 16, b: 40 }, { min: -20, max: 30, ticks: range(-20, 30, 10), label: 'Temperature (°C)' },
+      { min: 0, max: 14000, ticks: range(0, 14000, 2000), label: 'Height (ft)', fmt: kft });
+    const dry = [[T0, 0], [Tb, base]], dew = [[Td0, 0], [Tb, base]];
+    const frz = base + Tb / 1.5 * 1000, i20 = base + (Tb + 10) / 1.5 * 1000;
+    const sat = [[Tb, base], [Tb - 1.5 * (14000 - base) / 1000, 14000]];
+    return svg(640, 300, 'Rising air, dew point and cloud base', id => fr.grid +
+      `<rect x="${fr.X(-20)}" y="${f(fr.Y(i20))}" width="${f(fr.X(30) - fr.X(-20))}" height="${f(fr.Y(frz) - fr.Y(i20))}" class="fa-sel"/>
+       ${text(fr.X(29), fr.Y((frz + i20) / 2) + 4, 'icing most likely: 0 to −10 °C in cloud', 't-sel', 'end')}
+       <path d="${fr.path(dry)}" class="s-acc nf"/><path d="${fr.path(dew)}" class="s-live nf" stroke-dasharray="7 5"/><path d="${fr.path(sat)}" class="s-acc nf" style="opacity:.7"/>
+       ${line(fr.X(-20), f(fr.Y(base)), fr.X(30), f(fr.Y(base)), 's-dash')}${text(fr.X(29), f(fr.Y(base) - 6), 'cloud base ≈ ' + Math.round(base / 100) * 100 + ' ft', 'tb', 'end')}
+       ${line(fr.X(0), 16, fr.X(0), 260, 's-thin')}
+       ${text(f(fr.X(T0) + 6), f(fr.Y(0) - 8), 'air 20 °C', 't-acc')}${text(f(fr.X(Td0) - 8), f(fr.Y(0) - 8), 'dew point 12 °C', 't-live', 'end')}
+       ${text(f(fr.X((T0 + Tb) / 2) + 12), f(fr.Y(base / 2) + 4), '−3 °C per 1000 ft', 't-acc')}${text(f(fr.X((Td0 + Tb) / 2) - 12), f(fr.Y(base / 2) + 4), '−0.5 °C per 1000 ft', 't-live', 'end')}
+       ${text(f(fr.X(Tb - 5) + 8), f(fr.Y(base + 2600)), 'in cloud ≈ −1.5 °C per 1000 ft', 't-acc')}
+       ${text(fr.X(-19), f(fr.Y(frz) + 16), 'freezing level ≈ ' + Math.round(frz / 100) * 100 + ' ft', 't')}`);
+  };
+
+  // ---------------------------------------------------------------- 6.3 wake turbulence
+  F.wake = () => svg(640, 300, 'Wake vortices behind an aircraft', id => {
+    const spiral = (cx, cy, dir) => { let d = ''; for (let i = 0; i <= 60; i++) { const a = i / 60 * Math.PI * 5, r = 3 + i * 0.42; d += (i ? 'L' : 'M') + f(cx + dir * r * Math.cos(a)) + ' ' + f(cy + r * Math.sin(a)); } return `<path d="${d}" class="s-sel nf" style="stroke-width:1.6"/>`; };
+    return `<g transform="translate(160 80)"><path d="M-110 0 L-14 -4 L14 -4 L110 0 L110 4 L-110 4 Z" class="f-line"/><ellipse cx="0" cy="0" rx="14" ry="16" class="f-soft s-line"/><path d="M-3 -16 L0 -40 L3 -16 Z" class="f-line"/></g>
+      ${spiral(52, 96, 1)}${spiral(268, 96, -1)}${text(160, 30, 'Seen from behind', 'tb', 'middle')}
+      ${arrow(id, 70, 120, 110, 120, 'sel')}${arrow(id, 250, 120, 210, 120, 'sel')}${text(160, 146, 'air rolls up around the wingtips', 't-sel', 'middle')}
+      ${arrow(id, 52, 160, 52, 240, 'warn')}${arrow(id, 268, 160, 268, 240, 'warn')}${text(160, 206, 'sinks ~300–500 fpm', 't-warn', 'middle')}${text(160, 222, 'levels off 500–900 ft below', 't-warn', 'middle')}
+      <rect x="20" y="266" width="280" height="10" class="f-ground"/>${arrow(id, 110, 258, 30, 258, 'line')}${arrow(id, 210, 258, 290, 258, 'line')}${text(160, 294, 'near the ground they spread out', 't', 'middle')}
+      <g transform="translate(330 30)">${text(0, 0, 'ICAO separation on approach (radar)', 'tb')}
+        ${[['Leader', 'Follower', 'Distance'], ['Super (A380)', 'Heavy', '6 NM'], ['Super (A380)', 'Medium', '7 NM'], ['Super (A380)', 'Light', '8 NM'], ['Heavy', 'Heavy', '4 NM'], ['Heavy', 'Medium', '5 NM'], ['Heavy', 'Light', '6 NM'], ['Medium', 'Light', '5 NM']].map((r, i) =>
+          `${i ? line(0, 14 + i * 26, 290, 14 + i * 26, 's-grid') : ''}${text(0, 32 + i * 26, r[0], i ? 't' : 'tb')}${text(120, 32 + i * 26, r[1], i ? 't' : 'tb')}${text(290, 32 + i * 26, r[2], i ? 't-acc' : 'tb', 'end')}`).join('')}
+        ${text(0, 236, 'Departures: 2 min for light and medium', 't')}${text(0, 252, 'aircraft behind a heavy (3 min behind', 't')}${text(0, 268, 'an A380). Otherwise 3 NM radar minimum.', 't')}</g>`;
+  });
+
+  // ================================================================ AIRCRAFT PAGES
+  const niceStep = span => (span > 260 ? 40 : span > 130 ? 20 : 10);
+
+  /**
+   * Airspeed indicator with the certification colour arcs, drawn like the real instrument (always a dark
+   * face). o = { vso, vs1, vfe, vno, vne, vmca, vyse, needle, notes: [text...], title }
+   */
+  F.asi = o => {
+    const vne = o.vne || (o.vno ? o.vno * 1.26 : 160);
+    const v0 = Math.max(0, Math.floor(((o.vso || o.vs1 || vne * 0.3) * 0.7) / 10) * 10);
+    const v1 = Math.ceil(vne * 1.12 / 10) * 10;
+    const cx = 168, cy = 166, R = 146;
+    const th = v => -150 + (Math.min(v1, Math.max(v0, v)) - v0) / (v1 - v0) * 300;
+    const P = (v, r) => brg(cx, cy, th(v), r);
+    const arc = (a, b, r, col, w) => {
+      if (!(a > 0) || !(b > a)) return '';
+      const [x0, y0] = P(a, r), [x1, y1] = P(b, r);
+      const large = th(b) - th(a) > 180 ? 1 : 0;
+      return `<path d="M${f(x0)} ${f(y0)} A${r} ${r} 0 ${large} 1 ${f(x1)} ${f(y1)}" fill="none" stroke="${col}" stroke-width="${w}"/>`;
+    };
+    const radial = (v, col, r0, r1, w = 4) => { if (!(v > 0)) return ''; const [x0, y0] = P(v, r0), [x1, y1] = P(v, r1); return `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`; };
+    const step = niceStep(v1 - v0);
+    let ticks = '';
+    for (let v = Math.ceil(v0 / 10) * 10; v <= v1; v += 10) {
+      const major = v % step === 0;
+      const [x0, y0] = P(v, R - 2), [x1, y1] = P(v, R - (major ? 17 : 11));
+      ticks += `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="#E8EEF2" stroke-width="${major ? 2 : 1}"/>`;
+      if (major) { const [tx, ty] = P(v, R - 42); ticks += `<text x="${f(tx)}" y="${f(ty + 5)}" text-anchor="middle" fill="#E8EEF2" style="font:700 14px var(--font-num)">${v}</text>`; }
+    }
+    const WHITE = '#F4F7F9', GREEN = '#35C26A', YELLOW = '#F0BE2A', RED = '#EF4B4B', BLUE = '#3E93F0';
+    const vfeTop = o.vfe && o.vso ? o.vfe : null;
+    const needle = o.needle > 0 ? (() => { const [x, y] = P(o.needle, R - 22); return `<line x1="${cx}" y1="${cy}" x2="${f(x)}" y2="${f(y)}" stroke="#FF9F1C" stroke-width="4" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="8" fill="#FF9F1C"/>`; })() : `<circle cx="${cx}" cy="${cy}" r="6" fill="#56636D"/>`;
+    const rows = [];
+    if (vfeTop) rows.push([WHITE, 'White arc', `Vso ${Math.round(o.vso)} – Vfe ${Math.round(o.vfe)} kt · flap operating range`]);
+    if (o.vs1 && o.vno) rows.push([GREEN, 'Green arc', `Vs1 ${Math.round(o.vs1)} – Vno ${Math.round(o.vno)} kt · normal operation`]);
+    if (o.vno && vne) rows.push([YELLOW, 'Yellow arc', `${Math.round(o.vno)} – ${Math.round(vne)} kt · smooth air only`]);
+    if (o.vne) rows.push([RED, 'Red line', `Vne ${Math.round(o.vne)} kt · never exceed`]);
+    if (o.vmca) rows.push([RED, 'Red radial', `Vmca ${Math.round(o.vmca)} kt · min. control, engine out`]);
+    if (o.vyse) rows.push([BLUE, 'Blue line', `Vyse ${Math.round(o.vyse)} kt · best climb, engine out`]);
+    const legend = rows.map(([c, k, t], i) => `<rect x="352" y="${34 + i * 38}" width="18" height="8" rx="2" fill="${c}" stroke="var(--fig-line)" stroke-width="0.6"/>${text(378, 42 + i * 38, k, 'tb')}${text(378, 58 + i * 38, t, 't')}`).join('');
+    const noteLines = (o.notes || []).flatMap(t => wrap(t, 44));
+    const notes = noteLines.map((t, i) => text(352, 60 + rows.length * 38 + i * 17, t, 't')).join('');
+    return svg(640, 332, 'Airspeed indicator with colour arcs', id => `
+      <circle cx="${cx}" cy="${cy}" r="${R + 6}" fill="#2B3640"/><circle cx="${cx}" cy="${cy}" r="${R}" fill="#10171E"/>
+      ${arc(o.vso, vfeTop, R - 19, WHITE, 6)}${arc(o.vs1, o.vno, R - 8, GREEN, 8)}${arc(o.vno, o.vne ? vne : null, R - 8, YELLOW, 8)}
+      ${radial(o.vne, RED, R - 26, R - 1, 5)}${radial(o.vmca, RED, R - 26, R - 1, 4)}${radial(o.vyse, BLUE, R - 26, R - 1, 4)}
+      ${ticks}
+      <text x="${cx}" y="${cy + 46}" text-anchor="middle" fill="#9FB0BC" style="font:700 11px var(--font-ui);letter-spacing:.14em">AIRSPEED</text>
+      <text x="${cx}" y="${cy + 62}" text-anchor="middle" fill="#9FB0BC" style="font:700 11px var(--font-ui);letter-spacing:.14em">KNOTS</text>
+      ${needle}${legend}${notes}
+      ${o.title ? text(352, 18, o.title, 'tb') : ''}`);
+  };
+
+  /** Speed band for jets: coloured ranges and labelled marks on one axis. o = { min, max, bands, marks, caption } */
+  F.speedBand = o => {
+    const W = 640, x0 = 30, x1 = 612;
+    const X = v => x0 + (v - o.min) / (o.max - o.min) * (x1 - x0);
+    const placed = [], ends = [];
+    for (const m of (o.marks || []).slice().sort((a, b) => a.v - b.v)) {
+      const x = X(m.v), w = m.label.length * 6.9 + 12;
+      let r = ends.findIndex(e => e < x - w / 2);
+      if (r < 0) { r = ends.length; ends.push(-1e9); }
+      ends[r] = x + w / 2;
+      placed.push({ m, x, r });
+    }
+    const rows = Math.max(1, ends.length), y = 30 + rows * 22 + 12, H = y + 64;
+    const bands = (o.bands || []).map(b => `<rect x="${f(X(b.from))}" y="${y - 12}" width="${f(Math.max(1, X(b.to) - X(b.from)))}" height="24" class="${b.cls}"/>`).join('');
+    let ticks = '';
+    const st = o.max - o.min > 200 ? 20 : 10;
+    for (let v = Math.ceil(o.min / st) * st; v <= o.max; v += st) ticks += line(f(X(v)), y + 12, f(X(v)), y + (v % (st * 2) === 0 ? 20 : 16), 's-thin') + (v % (st * 2) === 0 ? text(f(X(v)), y + 34, v, 't tm', 'middle') : '');
+    const marks = placed.map(({ m, x, r }) => {
+      const ly = y - 26 - r * 22, cls = m.cls || 'acc', neutral = cls === 'line';
+      return `<line x1="${f(x)}" y1="${ly + 5}" x2="${f(x)}" y2="${y - 12}" class="s-${neutral ? 'thin' : cls}" style="stroke-width:1.4"/>
+        <circle cx="${f(x)}" cy="${y}" r="4.5" class="f-${neutral ? 'line' : cls}"/>${text(f(x), ly, m.label, neutral ? 'tb' : 't-' + cls, 'middle')}`;
+    }).join('');
+    return svg(W, H, o.title || 'Speed band', id => `${bands}<rect x="${x0}" y="${y - 12}" width="${x1 - x0}" height="24" fill="none" class="s-thin"/>${ticks}${marks}
+      ${text(W / 2, H - 6, o.caption || 'knots indicated (CAS)', 't', 'middle')}`);
+  };
+
+  /** Stall speed against mass for several configurations: Vs ∝ √mass. o = { mMin, mMax, lines:[{name, vAtMax, cls}], marks:[{m, label}] } */
+  F.stallWeight = o => {
+    const vs = o.lines.flatMap(l => [l.vAtMax * Math.sqrt(o.mMin / o.mMax), l.vAtMax]);
+    const lo = Math.floor(Math.min(...vs) * 0.9 / 10) * 10, hi = Math.ceil(Math.max(...vs) * 1.06 / 10) * 10;
+    const t = o.mMax > 20000;
+    const sc = t ? 1000 : 1;
+    const fr = frame(640, 290, { l: 56, r: 26, t: 16, b: 40 }, { min: o.mMin / sc, max: o.mMax / sc, ticks: range(Math.ceil(o.mMin / sc / (t ? 10 : 100)) * (t ? 10 : 100), o.mMax / sc, t ? (o.mMax > 200000 ? 50 : 10) : 100), label: t ? 'Mass (tonnes)' : 'Mass (kg)' },
+      { min: lo, max: hi, ticks: range(lo, hi, hi - lo > 80 ? 20 : 10), label: 'Stall speed (kt)' });
+    const lines = o.lines.map((l, i) => {
+      const pts = range(o.mMin, o.mMax, (o.mMax - o.mMin) / 40).map(m => [m / sc, l.vAtMax * Math.sqrt(m / o.mMax)]);
+      const end = pts[pts.length - 1];
+      return `<path d="${fr.path(pts)}" class="s-${l.cls} nf"/>${text(f(fr.X(end[0]) - 12), f(fr.Y(end[1]) + (i % 2 ? 18 : -9)), l.name + ' ' + Math.round(l.vAtMax) + ' kt', 't-' + l.cls, 'end')}`;
+    }).join('');
+    const marks = (o.marks || []).map(m => { const x = fr.X(m.m / sc), right = x > 560; return line(f(x), 16, f(x), 250, 's-dash') + text(f(x + (right ? -5 : 5)), 30, m.label, 't', right ? 'end' : 'start'); }).join('');
+    return svg(640, 290, 'Stall speed against mass', id => fr.grid + marks + lines);
+  };
+
+  /** Airliner V-speeds against mass (lift equation, default flaps). p = performance profile. */
+  F.vspeedsWeight = p => {
+    const P = root.XFC.perf;
+    const mMin = Math.round((p.oew + (p.mzfw - p.oew) * 0.15) / 1000) * 1000, mMax = p.mtow;
+    const ms = range(mMin, mMax, (mMax - mMin) / 40);
+    const to = ms.map(m => [m, P.takeoffSpeeds(p, m, null)]);
+    const ld = ms.filter(m => m <= p.mlw * 1.001).map(m => [m, P.landingSpeeds(p, m, null)]);
+    const all = to.flatMap(([, s]) => [s.v1, s.v2]).concat(ld.map(([, s]) => s.vref));
+    const lo = Math.floor(Math.min(...all) * 0.95 / 10) * 10, hi = Math.ceil(Math.max(...all) * 1.04 / 10) * 10;
+    const big = mMax > 200000;
+    const fr = frame(640, 300, { l: 56, r: 24, t: 16, b: 40 }, { min: mMin / 1000, max: mMax / 1000, ticks: range(Math.ceil(mMin / 1000 / (big ? 50 : 10)) * (big ? 50 : 10), mMax / 1000, big ? 50 : 10), label: 'Mass (tonnes)' },
+      { min: lo, max: hi, ticks: range(lo, hi, hi - lo > 90 ? 20 : 10), label: 'Speed (kt)' });
+    const pl = (pts, k) => fr.path(pts.map(([m, s]) => [m / 1000, s[k]]));
+    const last = (pts, k) => { const [m, s] = pts[pts.length - 1]; return [fr.X(m / 1000), fr.Y(s[k])]; };
+    const lab = (pts, k, s, cls, dy) => { const [x, y] = last(pts, k); return text(f(x - 4), f(y + dy), s, 't-' + cls, 'end'); };
+    const fTo = to[0][1].flap, fLd = ld.length ? ld[0][1].flap : '';
+    const pre = p.policy === 'airbus' ? 'CONF ' : 'flaps ';
+    return svg(640, 300, 'Take-off and landing speeds against mass', id => fr.grid +
+      `<path d="${pl(to, 'v2')}" class="s-acc nf"/><path d="${pl(to, 'vr')}" class="s-sel nf"/><path d="${pl(to, 'v1')}" class="s-live nf"/>
+       ${ld.length > 1 ? `<path d="${pl(ld, 'vref')}" class="s-warn nf" stroke-dasharray="7 5"/>` : ''}
+       ${lab(to, 'v2', 'V2', 'acc', -8)}${lab(to, 'vr', 'VR', 'sel', -8)}${lab(to, 'v1', 'V1', 'live', 16)}
+       ${line(f(fr.X(p.mlw / 1000)), 16, f(fr.X(p.mlw / 1000)), 260, 's-dash')}${text(f(fr.X(p.mlw / 1000) - 5), 30, 'MLW', 't', 'end')}
+       ${text(f(fr.X(mMin / 1000) + 8), 32, 'Take-off ' + pre + fTo, 't')}
+       ${ld.length > 1 ? `<line x1="${f(fr.X(mMin / 1000) + 8)}" y1="46" x2="${f(fr.X(mMin / 1000) + 34)}" y2="46" class="s-warn" stroke-dasharray="7 5"/>` + text(f(fr.X(mMin / 1000) + 40), 50, (p.policy === 'airbus' ? 'VLS ' : 'Vref ') + pre + fLd + ' (up to MLW)', 't-warn') : ''}`);
+  };
+
+  /** Payload–range diagram. pts = [{range, payload}], marks = [{range, payload, label}] */
+  F.payloadRange = (pts, marks, o = {}) => {
+    const maxR = Math.max(...pts.map(q => q.range)), maxP = Math.max(...pts.map(q => q.payload));
+    const rStep = maxR > 6000 ? 2000 : maxR > 2500 ? 1000 : 500;
+    const t = maxP > 3000, sc = t ? 1000 : 1;
+    const pStep = t ? (maxP > 60000 ? 20 : maxP > 25000 ? 5 : 2) : 200;
+    const fr = frame(640, 300, { l: 56, r: 26, t: 18, b: 40 }, { min: 0, max: Math.ceil(maxR * 1.08 / rStep) * rStep, ticks: range(0, Math.ceil(maxR * 1.08 / rStep) * rStep, rStep), label: 'Range (NM, still air, with reserves)', fmt: v => v.toLocaleString('en-US') },
+      { min: 0, max: Math.ceil(maxP / sc * 1.15 / pStep) * pStep, ticks: range(0, Math.ceil(maxP / sc * 1.15 / pStep) * pStep, pStep), label: t ? 'Payload (tonnes)' : 'Payload (kg)' });
+    const path = fr.path(pts.map(q => [q.range, q.payload / sc]));
+    const area = path + ` L${f(fr.X(pts[pts.length - 1].range))} ${f(fr.Y(0))} L${f(fr.X(0))} ${f(fr.Y(0))} Z`;
+    const mk = (marks || []).map((m, i) => `<circle cx="${f(fr.X(m.range))}" cy="${f(fr.Y(m.payload / sc))}" r="4.5" class="f-acc"/>` +
+      text(f(fr.X(m.range) + (i === 2 ? -8 : 8)), f(fr.Y(m.payload / sc) - 9), m.label, 't-acc', i === 2 ? 'end' : 'start')).join('');
+    return svg(640, 300, 'Payload against range', id => fr.grid + `<path d="${area}" class="fa-acc"/><path d="${path}" class="s-acc nf"/>` + mk +
+      (o.note ? text(f(fr.X(0) + 10), 34, o.note, 't') : ''));
   };
 
   root.XFC.figures = F;

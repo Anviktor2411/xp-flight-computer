@@ -11,6 +11,7 @@
   const sgn = (x, d = 0) => (x >= 0 ? '+' : '') + n(x, d);
   const has = x => Number.isFinite(x);
   const H = x => C.norm360(x);   // the app prints 360 instead of 000 for north
+  const qn = x => Math.round(x).toLocaleString('en-US');
 
   const list = [];
   const add = c => list.push(c);
@@ -750,6 +751,300 @@
     }
   });
 
+
+  // ===================================================================== WEATHER
+  const pad2 = x => String(x).padStart(2, '0');
+  add({
+    id: 'metar', group: 'Weather', title: 'METAR decoder', study: 'metar',
+    desc: 'Paste a METAR (ICAO or US format) and get it in plain language, with the ceiling, flight category, humidity, cloud base, density altitude and the wind on your runway.',
+    inputs: [
+      { k: 'text', label: 'METAR', type: 'text', v: 'EETN 271420Z 24012G22KT 200V280 9999 -SHRA FEW025CB SCT040 BKN080 12/08 Q1009 NOSIG' },
+      { k: 'rwy', label: 'Runway heading for the wind check (0 = skip)', unit: '°', v: 263, hint: 'METAR winds are true; for a precise check use the magnetic wind from ATIS' },
+      { k: 'elev', label: 'Airfield elevation', unit: 'ft', v: 131, live: s => (s.onGround ? s.altMsl : undefined) }
+    ],
+    run(v) {
+      const m = C.parseMetar(v.text);
+      if (m.error) return { error: m.error };
+      const res = [], notes = [], steps = [];
+      if (m.station || m.time) res.push({ label: 'Station & time', value: (m.station || '') + (m.time ? ` · day ${m.time.day}, ${pad2(m.time.hour)}:${pad2(m.time.min)} UTC` : '') + (m.auto ? ' · automatic' : ''), fmt: 'text' });
+      if (m.wind) {
+        const w = m.wind;
+        const t = w.calm ? 'calm' : (w.dir == null ? 'variable' : pad2(Math.round(w.dir)).padStart(3, '0') + '°') + ' ' + n(w.speed) + ' kt' + (w.gust ? ', gusts ' + n(w.gust) + ' kt' : '') + (w.varFrom != null ? ` (varying ${w.varFrom}°–${w.varTo}°)` : '');
+        res.push({ label: 'Wind (true)', value: t, fmt: 'text', main: true });
+      }
+      if (m.visM != null) {
+        const km = m.visM >= 5000 ? n(m.visM / 1000, 1).replace(/\.0$/, '') + ' km' : n(m.visM) + ' m';
+        const sm = Number.isInteger(m.visSm) ? n(m.visSm) : n(m.visSm, 2).replace(/0$/, '');
+        const vis = m.cavok ? '10 km or more (CAVOK)' : m.visUnit === 'SM' ? (m.visPlus ? 'more than ' : m.visLess ? 'less than ' : '') + sm + ' SM (' + km + ')' : m.visPlus ? '10 km or more' : km;
+        res.push({ label: 'Visibility', value: vis, fmt: 'text', main: true });
+      }
+      res.push({ label: 'Weather', value: m.wx.length ? m.wx.map(x => x.text).join(', ') : m.cavok ? 'none' : 'none reported', fmt: 'text' });
+      res.push({ label: 'Cloud', value: m.cavok ? 'no cloud below 5000 ft, no CB' : m.clouds.length ? m.clouds.map(c => (c.cover === 'VV' ? 'sky obscured, vertical visibility ' : c.cover + ' ') + (c.baseFt != null ? c.baseFt + ' ft' : 'height unknown') + (c.type ? ' ' + c.type : '')).join(' · ') : ({ NSC: 'no significant cloud', NCD: 'no cloud detected', SKC: 'sky clear', CLR: 'clear below 12 000 ft' }[m.noCloud] || 'not reported'), fmt: 'text' });
+      res.push({ label: 'Ceiling', value: m.ceilingFt != null ? m.ceilingFt : NaN, unit: 'ft', note: 'lowest broken, overcast or obscured layer' });
+      if (m.ceilingFt == null) res[res.length - 1] = { label: 'Ceiling', value: 'none (no BKN or OVC layer)', fmt: 'text' };
+      if (m.category) res.push({ label: 'Flight category (US)', value: m.category, fmt: 'text', tone: m.category === 'VFR' ? 'ok' : m.category === 'MVFR' ? 'warn' : 'bad' });
+      if (has(m.temp)) {
+        const t = m.tempExact ?? m.temp, d = m.dewExact ?? m.dew;
+        res.push({ label: 'Temperature / dew point', value: n(t, m.tempExact != null ? 1 : 0) + ' / ' + (has(d) ? n(d, m.dewExact != null ? 1 : 0) : '?') + ' °C', fmt: 'text' });
+        if (has(d)) {
+          const cb = C.cloudBase({ tempC: t, dewC: d, elevFt: v.elev });
+          res.push({ label: 'Relative humidity', value: cb.rh, unit: '%' });
+          res.push({ label: 'Cumulus base (estimate)', value: cb.aglFt, unit: 'ft AGL', note: '400 ft per °C of spread' });
+          steps.push({ t: 'Cloud base from the temperature / dew-point spread', tex: R`h \approx 400 \times (${n(t, 1)} - ${n(d, 1)}) = ${n(cb.aglFt)}\ \text{ft}` });
+        }
+      }
+      if (has(m.qnh)) {
+        res.push({ label: 'QNH', value: m.qnh, q: 'press', d: m.altimeterInHg ? 1 : 0, note: m.altimeterInHg ? 'A' + (m.altimeterInHg * 100).toFixed(0) + ' = ' + m.altimeterInHg.toFixed(2) + ' inHg' : '' });
+        if (has(m.temp)) {
+          const pa = C.pressureAltitude(v.elev, m.qnh), da = C.densityAltitude(pa, m.tempExact ?? m.temp);
+          res.push({ label: 'Density altitude at ' + n(v.elev) + ' ft', value: da.ft, unit: 'ft', tone: da.ft - v.elev > 2000 ? 'warn' : null });
+          steps.push({ t: 'Pressure and density altitude of the airfield', tex: R`PA = ${n(v.elev)} + 145\,366\left[1 - \left(\tfrac{${n(m.qnh, 1)}}{1013.25}\right)^{0.1903}\right] = ${n(pa)}\ \text{ft} \qquad DA = ${n(da.ft)}\ \text{ft}` });
+        }
+      }
+      if (m.wind && !m.wind.calm && m.wind.dir != null && v.rwy > 0) {
+        const wc = C.windComponents(m.wind.dir, m.wind.speed, v.rwy, m.wind.gust || undefined);
+        res.push({ label: `Runway ${pad2(Math.round(C.norm360(v.rwy) / 10) || 36)}: ${wc.head >= 0 ? 'head' : 'tail'}wind / crosswind`, value: n(Math.abs(wc.head)) + ' / ' + n(Math.abs(wc.cross)) + ' kt' + (has(wc.gustCross) ? ' (gusts ' + n(Math.abs(wc.gustCross)) + ')' : ''), fmt: 'text', tone: wc.head < -10 ? 'bad' : wc.head < 0 ? 'warn' : null, note: 'crosswind from the ' + wc.side });
+        steps.push({ t: 'Runway wind components', tex: R`HW = ${n(m.wind.speed)}\cos(${n(m.wind.dir)}^\circ - ${n(v.rwy)}^\circ) = ${n(wc.head, 1)} \qquad XW = ${n(m.wind.speed)}\sin(\dots) = ${n(wc.cross, 1)}\ \text{kt}` });
+      }
+      if (m.rvr.length) notes.push('Runway visual range: ' + m.rvr.map(r => 'RWY ' + r.rwy + ' ' + (r.prefix === 'P' ? 'more than ' : r.prefix === 'M' ? 'less than ' : '') + r.value + (r.max ? '–' + r.max : '') + (r.ft ? ' ft' : ' m') + (r.trend ? { U: ' rising', D: ' falling', N: ' steady' }[r.trend] : '')).join(', ') + '.');
+      if (m.recent) notes.push('Recent weather: ' + m.recent.join(', ') + '.');
+      if (m.windshear) notes.push('Wind shear reported: ' + m.windshear.trim() + '.');
+      if (m.trend) notes.push('Trend: ' + m.trend.replace('NOSIG', 'no significant change expected in the next 2 hours') + '.');
+      if (m.remarks) notes.push('Remarks (not decoded): ' + m.remarks);
+      if (m.unknown.length) notes.push('Not decoded: ' + m.unknown.join(' '));
+      return { results: res, steps, notes };
+    }
+  });
+
+  add({
+    id: 'cloud-base', group: 'Weather', title: 'Cloud base, humidity & freezing level', study: 'clouds-icing',
+    desc: 'Estimate the base of cumulus cloud and the freezing level from the surface temperature and dew point.',
+    inputs: [
+      { k: 't', label: 'Surface temperature', unit: '°C', v: 20, live: s => (s.onGround ? s.oat : undefined) },
+      { k: 'td', label: 'Dew point', unit: '°C', v: 12 },
+      { k: 'elev', label: 'Ground elevation', unit: 'ft', v: 0, live: s => (s.onGround ? s.altMsl : undefined) }
+    ],
+    run(v) {
+      if (v.td > v.t + 0.05) return { error: 'The dew point cannot be higher than the temperature.' };
+      const r = C.cloudBase({ tempC: v.t, dewC: v.td, elevFt: v.elev });
+      return {
+        results: [
+          { label: 'Cumulus base above ground', value: r.aglFt, unit: 'ft', main: true },
+          { label: 'Cloud base altitude', value: r.mslFt, unit: 'ft MSL', main: true },
+          { label: 'Relative humidity', value: r.rh, unit: '%', tone: r.rh > 90 ? 'warn' : null, note: r.rh > 90 ? 'mist or fog likely, especially overnight' : '' },
+          { label: 'Temperature / dew-point spread', value: r.spread, unit: '°C', d: 1 },
+          { label: 'Freezing level (estimate)', value: v.t > 0 ? r.freezeMslFt : v.elev, unit: 'ft MSL', note: v.t > 0 ? 'average lapse 2 °C per 1000 ft' : 'freezing at the surface' },
+          { label: 'Temperature at the cloud base', value: r.baseTempC, unit: '°C', d: 1, tone: r.baseTempC <= 0 && r.baseTempC > -20 ? 'warn' : null, note: r.baseTempC <= 0 ? 'icing possible in this cloud' : '' }
+        ],
+        steps: [
+          { t: 'The spread closes about 2.5 °C per 1000 ft of rise (dry adiabatic 3 °C minus dew point 0.5 °C)', tex: R`h_{base} = \frac{T - T_d}{2.5} \times 1000 = \frac{${n(v.t, 1)} - ${n(v.td, 1)}}{2.5} \times 1000 = ${n(r.aglFt)}\ \text{ft}` },
+          { t: 'Relative humidity (Magnus formula)', tex: R`RH = 100\,e^{\frac{17.625\cdot ${n(v.td, 1)}}{243.04 + ${n(v.td, 1)}} - \frac{17.625\cdot ${n(v.t, 1)}}{243.04 + ${n(v.t, 1)}}} = ${n(r.rh, 1)}\ \%` },
+          { t: 'Freezing level with the standard lapse rate', tex: R`h_{0^\circ} = ${n(v.elev)} + \frac{${n(v.t, 1)}}{1.98} \times 1000 = ${n(r.freezeMslFt)}\ \text{ft}` }
+        ],
+        notes: ['Estimates for convective (cumulus) cloud; layer cloud and fronts do not follow this rule.']
+      };
+    }
+  });
+
+  // ============================================================ RADIO NAVIGATION
+  add({
+    id: 'dme', group: 'Radio navigation', title: 'DME slant range', study: 'radio-nav',
+    desc: 'DME measures the straight line to the station. Get the distance over the ground from your height above the station.',
+    inputs: [
+      { k: 'dme', label: 'DME reading', unit: 'NM', v: 10, step: 0.1 },
+      { k: 'alt', label: 'Aircraft altitude', unit: 'ft', v: 20000, live: s => s.altInd },
+      { k: 'stn', label: 'Station elevation', unit: 'ft', v: 0 }
+    ],
+    run(v) {
+      const h = Math.max(0, v.alt - v.stn), r = C.dmeGround({ dmeNm: v.dme, heightFt: h });
+      return {
+        results: [
+          { label: 'Ground distance', value: r.groundNm, unit: 'NM', d: 2, main: true, note: r.overhead ? 'you are overhead: the DME shows your height' : '' },
+          { label: 'Height above the station', value: r.heightNm, unit: 'NM', d: 2 },
+          { label: 'Slant-range error', value: r.errorNm, unit: 'NM', d: 2, tone: r.errorPct > 5 ? 'warn' : null, note: n(r.errorPct, 1) + ' % of the reading' },
+          { label: 'Error below 1 % from', value: r.heightNm * 7.1, unit: 'NM DME', d: 1, note: 'about 7 × the height' }
+        ],
+        steps: [
+          { t: 'Height above the station in nautical miles', tex: R`h = \frac{${n(h)}}{6076} = ${n(r.heightNm, 3)}\ \text{NM}` },
+          { t: 'Pythagoras: DME is the hypotenuse', tex: R`d = \sqrt{${n(v.dme, 2)}^2 - ${n(r.heightNm, 3)}^2} = ${n(r.groundNm, 3)}\ \text{NM}` }
+        ]
+      };
+    }
+  });
+
+  add({
+    id: 'ils', group: 'Radio navigation', title: 'ILS glide path heights', study: 'ils',
+    desc: 'Height and altitude on the glide path at any distance from the threshold, and the descent rate for your ground speed.',
+    inputs: [
+      { k: 'd', label: 'Distance from the threshold', unit: 'NM', v: 5, step: 0.1 },
+      { k: 'ang', label: 'Glide path angle', unit: '°', v: 3, step: 0.1 },
+      { k: 'tch', label: 'Threshold crossing height', unit: 'ft', v: 50 },
+      { k: 'thr', label: 'Threshold elevation', unit: 'ft', v: 131 },
+      { k: 'gs', label: 'Ground speed', unit: 'kt', v: 140, live: s => s.gs },
+      { k: 'da', label: 'Decision height above the threshold', unit: 'ft', v: 200 }
+    ],
+    run(v) {
+      const g = C.glidePath({ distNm: v.d, angleDeg: v.ang, tchFt: v.tch, gs: v.gs, thrElevFt: v.thr });
+      const dDa = Math.max(0, (v.da - v.tch) / g.ftPerNm);
+      const table = [1, 2, 3, 4, 5, 6, 8, 10].map(d => d + ' NM ' + n(v.tch + d * g.ftPerNm) + ' ft').join(' · ');
+      return {
+        results: [
+          { label: 'Height above the threshold', value: g.heightFt, unit: 'ft', main: true },
+          { label: 'Altitude on the glide path', value: g.altFt, unit: 'ft', main: true },
+          { label: 'Descent rate', value: g.vs, unit: 'fpm', main: true },
+          { label: 'Glide path gradient', value: g.ftPerNm, unit: 'ft/NM' },
+          { label: 'Decision height reached at', value: dDa, unit: 'NM', d: 2, note: n(dDa * 1852) + ' m before the threshold' }
+        ],
+        steps: [
+          { t: 'Height gained per nautical mile on this path', tex: R`6076 \times \tan ${n(v.ang, 1)}^\circ = ${n(g.ftPerNm, 1)}\ \text{ft/NM}` },
+          { t: 'Height above the threshold', tex: R`h = ${n(v.tch)} + ${n(v.d, 1)} \times ${n(g.ftPerNm, 1)} = ${n(g.heightFt)}\ \text{ft} \quad \Rightarrow \quad ${n(g.altFt)}\ \text{ft altitude}` },
+          { t: 'Descent rate: ground speed in ft/min times the gradient', tex: R`VS = ${n(v.gs)} \times 101.3 \times \tan ${n(v.ang, 1)}^\circ = ${n(g.vs)}\ \text{fpm}` }
+        ],
+        notes: ['Heights above the threshold: ' + table + '.']
+      };
+    }
+  });
+
+  add({
+    id: 'ndb', group: 'Radio navigation', title: 'NDB / ADF bearings', study: 'radio-nav',
+    desc: 'The magnetic bearing to and from the beacon, from your heading and the ADF needle.',
+    inputs: [
+      { k: 'hdg', label: 'Magnetic heading', unit: '°M', v: 350, live: s => s.hdgM },
+      { k: 'rb', label: 'Relative bearing (ADF needle)', unit: '°', v: 30, hint: 'clockwise from the nose, 0–360' }
+    ],
+    run(v) {
+      const r = C.ndbBearing({ heading: v.hdg, relBearing: v.rb });
+      const rb = C.norm360(v.rb), turn = rb <= 180 ? 'right ' + n(rb) : 'left ' + n(360 - rb);
+      return {
+        results: [
+          { label: 'Bearing to the beacon (QDM)', value: H(r.qdm), fmt: 'hdg', main: true },
+          { label: 'Bearing from the beacon (QDR)', value: H(r.qdr), fmt: 'hdg', main: true },
+          { label: 'To head straight for it', value: 'turn ' + turn + '°', fmt: 'text', note: 'then keep the needle on the nose (no wind)' }
+        ],
+        steps: [{ t: 'The needle measures from the nose, so add the heading', tex: R`\text{QDM} = \text{MH} + \text{RB} = ${n(v.hdg)}^\circ + ${n(v.rb)}^\circ = ${n(H(r.qdm))}^\circ \qquad \text{QDR} = ${n(H(r.qdr))}^\circ` }]
+      };
+    }
+  });
+
+  add({
+    id: 'compass', group: 'Navigation', title: 'True ⇄ magnetic ⇄ compass heading', study: 'compass',
+    desc: 'Convert between true, magnetic and compass headings with variation and deviation (east is positive).',
+    inputs: [
+      { k: 'from', label: 'Start from', type: 'select', v: 'true', options: [['true', 'True heading'], ['mag', 'Magnetic heading'], ['compass', 'Compass heading']] },
+      { k: 'val', label: 'Heading', unit: '°', v: 70, live: (s, v) => (v.from === 'true' ? s.hdgT : v.from === 'mag' ? s.hdgM : undefined) },
+      { k: 'var', label: 'Variation (east +, west −)', unit: '°', v: 8, live: s => s.magVar },
+      { k: 'dev', label: 'Deviation (east +, west −)', unit: '°', v: -3, hint: 'from the compass correction card' }
+    ],
+    run(v) {
+      const r = C.headings({ from: v.from, value: v.val, variation: v.var, deviation: v.dev });
+      return {
+        results: [
+          { label: 'True', value: H(r.trueHdg), fmt: 'hdg', main: v.from !== 'true' },
+          { label: 'Magnetic', value: H(r.magHdg), fmt: 'hdg', main: v.from !== 'mag' },
+          { label: 'Compass', value: H(r.compassHdg), fmt: 'hdg', main: v.from !== 'compass' }
+        ],
+        steps: [
+          { t: 'True = magnetic + east variation (subtract east going the other way: “east is least”)', tex: R`${n(H(r.trueHdg))}^\circ = ${n(H(r.magHdg))}^\circ ${v.var >= 0 ? '+' : '-'} ${n(Math.abs(v.var), 1)}^\circ` },
+          { t: 'Magnetic = compass + east deviation', tex: R`${n(H(r.magHdg))}^\circ = ${n(H(r.compassHdg))}^\circ ${v.dev >= 0 ? '+' : '-'} ${n(Math.abs(v.dev), 1)}^\circ` }
+        ]
+      };
+    }
+  });
+
+  // ======================================================================== CRUISE
+  add({
+    id: 'step-climb', group: 'Cruise', title: 'Optimum altitude & step climb', study: 'cruise',
+    desc: 'The altitude where the wing is most efficient for your weight and Mach, and how much fuel to burn before the next 2000 ft step.',
+    inputs: [
+      { k: 'ac', label: 'Aircraft', type: 'select', v: 'auto', options: () => [['auto', 'Detected aircraft (or 737-800)']].concat((root.XFC.aircraft ? root.XFC.aircraft.PROFILES : []).filter(p => p.cruiseMach).map(p => [p.id, p.name])) },
+      { k: 'mass', label: 'Gross weight now', q: 'mass', v: 70000, live: s => s.mass },
+      { k: 'mach', label: 'Cruise Mach', unit: 'M', v: 0.785, step: 0.01, live: s => (s.mach > 0.5 ? s.mach : undefined) },
+      { k: 'fl', label: 'Cruising level now', unit: 'FL', v: 350, step: 10, live: s => (s.pa > 18000 ? Math.round(s.pa / 1000) * 10 : undefined) },
+      { k: 'ff', label: 'Fuel flow (all engines)', q: 'flow', v: 2500, live: s => (s.ff > 0 ? s.ff : undefined) },
+      { k: 'cl', label: 'Best cruise lift coefficient', unit: 'C_L', v: 0.52, step: 0.01, hint: 'about 0.5 for most jet transports' }
+    ],
+    run(v, ctx) {
+      const A = root.XFC.aircraft;
+      let p = v.ac !== 'auto' && A && A.byId[v.ac];
+      if (!p) p = (ctx && ctx.det && ctx.det.profile && ctx.det.profile.cruiseMach ? ctx.det.profile : null) || (A && A.byId.B738);
+      if (!p) return { error: 'No aircraft profile available.' };
+      const o = C.optimumAltitude({ massKg: v.mass, wingArea: p.wingArea, mach: v.mach, clOpt: v.cl });
+      const cur = v.fl * 100, next = cur + 2000;
+      const pNext = C.isa(next - 1000).P;                         // step once the next level is ≤ 1000 ft above optimum
+      const wStep = 0.7 * p.wingArea * v.mach * v.mach * v.cl * pNext / C.K.g0;
+      const burn = Math.max(0, v.mass - wStep), tMin = v.ff > 0 ? burn / v.ff * 60 : NaN;
+      const diff = o.ft - cur;
+      const res = [
+        { label: 'Optimum altitude', value: 'FL' + String(Math.round(o.ft / 100)).padStart(3, '0'), fmt: 'text', main: true, note: n(o.ft) + ' ft for ' + p.name },
+        { label: 'Your level vs optimum', value: diff, unit: 'ft', signed: true, tone: Math.abs(diff) > 3000 ? 'warn' : 'ok', note: diff > 1000 ? 'optimum is above you' : diff < -1000 ? 'you are above optimum' : 'close to optimum' },
+        { label: 'Next step: FL' + String(next / 100).padStart(3, '0') + ' after burning', value: burn, q: 'mass', note: burn > 0 ? 'at ' + qn(wStep) + ' kg gross weight' : 'the next level is already within 1000 ft of optimum' },
+        { label: 'Time to the step at this fuel flow', value: tMin, fmt: 'min' }
+      ];
+      if (p.ceilingFt && o.ft > p.ceilingFt) res.push({ label: 'Certified ceiling', value: p.ceilingFt, unit: 'ft', tone: 'warn', note: 'optimum is above the ceiling: fly the ceiling or lower' });
+      return {
+        results: res,
+        steps: [
+          { t: 'Lift in terms of Mach and static pressure (½ρV² = 0.7 p M²)', tex: R`W = 0.7\,p\,S\,M^2 C_L \Rightarrow p_{opt} = \frac{${n(v.mass)} \times 9.807}{0.7 \times ${n(p.wingArea, 1)} \times ${n(v.mach, 3)}^2 \times ${n(v.cl, 2)}} = ${n(o.p)}\ \text{Pa}` },
+          { t: 'The ISA altitude with that pressure', tex: R`h(${n(o.hPa, 1)}\ \text{hPa}) = ${n(o.ft)}\ \text{ft}` },
+          { t: 'Weight at which FL' + next / 100 + ' is within 1000 ft of optimum', tex: R`W_{step} = \frac{0.7\,p(${n(next - 1000)}\ \text{ft})\,S\,M^2 C_L}{g} = ${n(wStep)}\ \text{kg}` }
+        ],
+        notes: ['Real maximum altitude is also limited by thrust and by a 1.3 g buffet margin; the FMS shows it as MAX ALT.']
+      };
+    }
+  });
+
+  // ==================================================================== OPERATIONS
+  add({
+    id: 'wake', group: 'Operations', title: 'Wake turbulence separation', study: 'wake',
+    desc: 'ICAO wake categories from the maximum take-off mass, and the separation you need behind the aircraft ahead.',
+    inputs: [
+      { k: 'lead', label: 'Aircraft ahead', type: 'select', v: 'H', options: [['J', 'Super — A380'], ['H', 'Heavy — 136 t or more'], ['M', 'Medium — 7 t to 136 t'], ['L', 'Light — up to 7 t']] },
+      { k: 'mtow', label: 'Your maximum take-off mass', q: 'mass', v: 79016, live: s => s.mtow }
+    ],
+    run(v) {
+      const f = C.wakeCategory(v.mtow), r = C.wakeSeparation(v.lead, f);
+      return {
+        results: [
+          { label: 'Your wake category', value: C.WAKE_NAMES[f], fmt: 'text', main: true },
+          { label: 'Radar separation on approach', value: r.distanceNm || r.radarMinimumNm, unit: 'NM', main: true, tone: r.wakeApplies ? 'warn' : null, note: r.wakeApplies ? 'wake turbulence minimum' : 'no wake minimum: normal radar separation' },
+          { label: 'Departure behind it', value: r.departureMin ? r.departureMin + ' minutes' : 'no wake interval', fmt: 'text' }
+        ],
+        steps: [],
+        notes: ['ICAO Doc 4444. Categories: Light ≤ 7 000 kg, Medium < 136 000 kg, Heavy ≥ 136 000 kg, Super = A380. Europe’s RECAT-EU uses six categories with shorter distances.']
+      };
+    }
+  });
+
+  // ====================================================================== AIRSPEED
+  add({
+    id: 'va', group: 'Airspeed', title: 'Manoeuvring speed at your weight', study: 'vspeeds',
+    desc: 'Va falls with the square root of weight: scale the handbook value to today’s mass, or derive it from the stall speed.',
+    inputs: [
+      { k: 'vaMax', label: 'Handbook Va (at maximum weight)', unit: 'kt', v: 105 },
+      { k: 'mMax', label: 'Maximum weight', q: 'mass', v: 1157, live: s => (s.mtow > 0 ? s.mtow : undefined) },
+      { k: 'm', label: 'Weight now', q: 'mass', v: 950, live: s => s.mass },
+      { k: 'vs', label: 'Stall speed clean at maximum weight (Vs1)', unit: 'kt', v: 53 },
+      { k: 'nlim', label: 'Category', type: 'select', v: '3.8', options: [['3.8', 'Normal (3.8 g)'], ['4.4', 'Utility (4.4 g)'], ['6', 'Aerobatic (6 g)'], ['2.5', 'Transport (2.5 g)']] }
+    ],
+    run(v) {
+      const k = Math.sqrt(v.m / v.mMax), nl = +v.nlim;
+      const va = v.vaMax * k, vsNow = v.vs * k;
+      return {
+        results: [
+          { label: 'Va at this weight', value: va, unit: 'kt', main: true, tone: 'ok' },
+          { label: 'From the stall speed: Vs√n', value: vsNow * Math.sqrt(nl), unit: 'kt', note: 'at this weight, ' + nl + ' g limit' },
+          { label: 'Stall speed at this weight', value: vsNow, unit: 'kt' },
+          { label: 'Change from the handbook value', value: (k - 1) * 100, unit: '%', d: 1, signed: true }
+        ],
+        steps: [
+          { t: 'Speeds based on the stall scale with the square root of weight', tex: R`V_A = ${n(v.vaMax)}\sqrt{\frac{${n(v.m)}}{${n(v.mMax)}}} = ${n(va, 1)}\ \text{kt}` },
+          { t: 'Definition: a full deflection reaches the stall at the limit load factor', tex: R`V_A = V_S\sqrt{n_{lim}} = ${n(vsNow, 1)}\sqrt{${nl}} = ${n(vsNow * Math.sqrt(nl), 1)}\ \text{kt}` }
+        ],
+        notes: ['Va protects against one full control deflection at a time, not rapid reversals. In turbulence fly at or below Va for your weight.']
+      };
+    }
+  });
+
   // ======================================================================= UNITS
   const UNITS = {
     speed: { name: 'Speed', u: { kt: ['knots', 1], kmh: ['km/h', 1 / 1.852], mph: ['mph', 1.609344 / 1.852], ms: ['m/s', 3600 / 1852], mach: ['Mach (sea level ISA)', 661.4788] } },
@@ -785,5 +1080,5 @@
   });
 
   root.XFC.calculators = list;
-  root.XFC.calcGroups = ['Wind', 'Airspeed', 'Atmosphere', 'Vertical', 'Turns', 'Navigation', 'Fuel', 'Mass & balance', 'Light aircraft', 'Units'];
+  root.XFC.calcGroups = ['Wind', 'Airspeed', 'Atmosphere', 'Weather', 'Vertical', 'Turns', 'Navigation', 'Radio navigation', 'Cruise', 'Fuel', 'Mass & balance', 'Light aircraft', 'Operations', 'Units'];
 })(typeof self !== 'undefined' ? self : this);

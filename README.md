@@ -3,9 +3,11 @@
 A study-level flight computer for **X-Plane 12**. It reads the sim live, detects the aircraft you are flying, and gives you:
 
 - **Live flight deck** — airspeeds (IAS, CAS, TAS, GS, Mach), altitudes (indicated, pressure, density, temperature-corrected), wind components, fuel endurance and range, stall margin at your current weight and bank. Every value is marked as either read from X-Plane or calculated by the app.
-- **25 calculators** — E6B-style tools: wind triangle, find the wind, runway crosswind, airspeed converter, crossover altitude, ISA, pressure and density altitude, cold-temperature correction, top of descent, vertical path to a fix, climb gradient, glide, turns, great circle, holding entries, fuel, mass & balance, GA runway corrections, units. Each one shows its working step by step, and “Follow sim” fills the inputs from X-Plane live.
+- **A study page for the aircraft you fly** — load any aircraft and it gets its own page: key numbers, its airspeed indicator with the colour arcs, stall speed against weight, how to fly it and a quiz. Airliners add V-speeds against weight, flap tables and a payload–range diagram. 52 types are in the library (from the Cessna 172 to the A380); anything else gets a page built from X-Plane’s own aircraft data.
+- **34 calculators** — E6B-style tools: wind triangle, crosswind, airspeed converter, crossover altitude, ISA, pressure and density altitude, cold-temperature correction, METAR decoder, cloud base, top of descent, glide, turns, great circle, holding entries, DME slant range, ILS glide path, NDB bearings, true/magnetic/compass headings, optimum altitude and step climb, wake separation, manoeuvring speed, fuel, mass & balance and more. Each shows its working step by step, and “Follow sim” fills the inputs from X-Plane live.
 - **Airliner performance**, which opens automatically when an airliner is detected: load sheet, fuel plan, take-off (V1/VR/V2, assumed temperature/FLEX, field length), landing (Vref/VLS, Vapp additives, landing distance, autobrake suggestion), crossover, top of descent, manoeuvre speeds. Runway data comes from X-Plane’s own airport database.
-- **Study library** — 21 topics in 5 chapters with diagrams, numbered equations, worked examples computed live, and the X-Plane datarefs behind each value.
+- **Study library** — 33 topics in 6 chapters (principles of flight, atmosphere, airspeed, navigation, airliner performance, weather & operations) with diagrams, numbered equations, worked examples computed live, the X-Plane datarefs behind each value, and a short quiz at the end of every page.
+- **Phone or tablet as a second screen** — switch it on in Settings and scan the QR code.
 
 > For flight simulation and study only. Not for real-world navigation or aircraft operation. Airliner figures are typical public data and estimates.
 
@@ -39,7 +41,23 @@ The app picks the best link on its own:
 
 ## Phone or tablet as a second screen
 
-Run **`start_lan.bat`** (Linux: `sh start.sh --lan`). The console prints an address like `http://192.168.1.20:8765` — open it on a device on the same Wi-Fi. On Windows, allow Python through the firewall for *private* networks when asked.
+1. On the PC, open the app and go to **Settings → Phone & tablet** (or press the phone button in the top bar). Press **Allow phones & tablets**. It stays switched on the next time you start the app.
+2. Scan the QR code with the phone’s camera, or type the address it shows, for example `http://192.168.1.20:8765`. The phone gets the whole app with live data.
+3. Windows may ask whether Python can use the network: click **Allow access**. The card checks the Windows Firewall for you; if it says Python is blocked, press **Fix the Windows Firewall** (Windows asks for permission once). If that does not work, run **`allow_phone_firewall.bat`**.
+
+The card also shows which devices have connected, so you can see the moment your phone gets through.
+
+**Phone still can’t connect?**
+
+- The phone must be on the **same Wi-Fi** as the PC — not a guest network, and not on mobile data. Turn off VPN apps on the phone while testing.
+- The phone’s Wi-Fi address should start the same way as the PC’s (for example both `192.168.1.x`). If not, they are on different networks or routers.
+- Type the address with **`http://`**, not https.
+- iPhone with Chrome, Edge or Firefox: allow **Settings → (browser) → Local Network**. Safari works without it.
+- The claude.ai preview link is a demo only; it can never show your sim. Use the address from the Phone & tablet card.
+- Some routers keep devices apart (“AP isolation” / “client isolation”). Turn it off, or connect both to the same router.
+- Linux with a firewall: `sudo ufw allow 8765/tcp` (ufw) or `sudo firewall-cmd --add-port=8765/tcp --permanent && sudo firewall-cmd --reload` (firewalld). The card tells you if one is running.
+
+Sharing listens on the PC’s addresses on your home network (behind your router), and settings can only be changed on the PC itself. The Windows rule the Fix button adds allows the app’s port from the local network only. Switch sharing off in the same card when you don’t need it.
 
 ## Runway data
 
@@ -62,7 +80,7 @@ Copy `user_profiles.example.json` to **`user_profiles.json`** next to `xpfc.py` 
 
 Speeds come from the lift equation, so the key numbers are the wing area and the effective CLmax per flap setting. If the app’s V-speeds for your aircraft come out a few knots fast, raise the CLmax values slightly; if slow, lower them.
 
-Built-in types: 737-600/700/800/900ER, 737 MAX 8, 737-300, A319, A320, A320neo, A321, A321neo, A330, A340-600, A350-900, A380, A300-600R, 757-200, 767-300ER, 777-200ER, 777-300ER, 787-9, 747-400, 747-8, 727-200, MD-82, MD-11, E175, E195, CRJ900, CRJ200, Dash 8 Q400, ATR 72-600. Unknown airliners get a generic profile built from X-Plane’s own weights.
+Built-in performance profiles: 737-600/700/800/900ER, 737 MAX 8, 737-300, A319, A320, A320neo, A321, A321neo, A330, A340-600, A350-900, A380, A300-600R, 757-200, 767-300ER, 777-200ER, 777-300ER, 787-9, 747-400, 747-8, 727-200, MD-82, MD-11, E175, E195, CRJ900, CRJ200, Dash 8 Q400, ATR 72-600. Unknown airliners get a generic profile built from X-Plane’s own weights.
 
 ## Command-line options
 
@@ -71,18 +89,21 @@ python xpfc.py [--port 8765] [--lan] [--xp-host IP] [--discover] [--xp-root PATH
                [--no-webapi] [--no-udp] [--no-browser] [--debug]
 ```
 
+`--lan` switches phone sharing on for this run (the same as the switch in Settings; `start_lan.bat` does this).
+
 ## Troubleshooting
 
 - **“No sim” / waiting for X-Plane** — check the X-Plane version (12.1.1+ for the Web API) or enable *Accept incoming connections*. Settings shows what each link reports.
 - **Port 8765 in use** — another copy is running, or use `--port 8766`.
 - **Aircraft not recognised as an airliner** — open Performance and pick the type manually, or add it to `user_profiles.json`.
+- **Phone cannot connect** — see *Phone or tablet as a second screen* above.
 
 ## For developers
 
 - `tools/fake_xplane.py` is a stand-in for X-Plane that speaks both the Web API and UDP RREF, with a scripted flight. `python tools/fake_xplane.py --aircraft B738 --cycle 30` switches aircraft every 30 s.
-- `node tests/test_calc.js` and `node tests/test_perf.js` check the maths against published ISA tables and reference values.
-- The web app is plain HTML/CSS/JS (no build step); `web/js/calc.js` holds all the aviation formulas.
+- `node tests/test_calc.js` and `node tests/test_perf.js` check the maths against published ISA tables and reference values, and the METAR decoder against sample reports.
+- The web app is plain HTML/CSS/JS (no build step): `web/js/calc.js` holds the aviation formulas, `web/js/study.js` the study topics, `web/js/types.js` the aircraft library and `web/js/acstudy.js` the aircraft pages.
 
 ## Credits
 
-Equations rendered with [KaTeX](https://katex.org) (MIT). Typefaces: **B612** and **B612 Mono** (SIL Open Font License), designed for Airbus cockpit displays, and **Source Serif 4** (SIL Open Font License). License texts are in `web/vendor`.
+Equations rendered with [KaTeX](https://katex.org) (MIT). QR codes by [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT). Typefaces: **B612** and **B612 Mono** (SIL Open Font License), designed for Airbus cockpit displays, and **Source Serif 4** (SIL Open Font License). License texts are in `web/vendor`.

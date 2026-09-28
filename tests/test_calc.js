@@ -109,5 +109,61 @@ near('W&B %MAC', mb.pctMac, 20, 1e-9);
 near('GA TO weight factor', C.gaRunway({ phase: 'to', base: 1000, baseMass: 1000, mass: 1100, elevFt: 0, tempC: 15, safety: false }).distance, 1210, 1e-6);
 near('GA LDG wet grass', C.gaRunway({ phase: 'ldg', base: 1000, elevFt: 0, tempC: 15, surface: 'wetGrass', safety: false }).distance, 1350, 1e-6);
 
+// Weather: humidity, cloud base, METAR decoding
+near('RH 20/10 °C (Magnus)', C.relHumidity(20, 10), 52.7, 0.3);
+near('RH saturated', C.relHumidity(12, 12), 100, 1e-9);
+near('cloud base 400 ft/°C', C.cloudBase({ tempC: 20, dewC: 12 }).aglFt, 3200, 1e-9);
+near('freezing level 15 °C → ~7600 ft', C.cloudBase({ tempC: 15, dewC: 5 }).freezeAglFt, 7576, 1);
+const mt = C.parseMetar('METAR EETN 271420Z 24012G22KT 200V280 9999 -SHRA FEW025CB SCT040 BKN080 12/08 Q1009 NOSIG');
+eq('METAR station', mt.station, 'EETN');
+eq('METAR wind dir', mt.wind.dir, 240);
+eq('METAR gust', mt.wind.gust, 22);
+eq('METAR variable from', mt.wind.varFrom, 200);
+eq('METAR vis 9999 → 10 km', mt.visM, 10000);
+eq('METAR wx', mt.wx[0].text, 'light showers of rain');
+eq('METAR CB', mt.clouds[0].type, 'CB');
+eq('METAR ceiling (BKN080)', mt.ceilingFt, 8000);
+eq('METAR temp', mt.temp, 12);
+eq('METAR QNH', mt.qnh, 1009);
+eq('METAR trend', mt.trend, 'NOSIG');
+eq('METAR category', mt.category, 'VFR');
+eq('METAR no unknown groups', mt.unknown.length, 0);
+const us = C.parseMetar('KJFK 271451Z 31015G25KT 1 1/2SM +TSRA BR BKN008 OVC015CB M02/M05 A2992 RMK AO2 T10171050');
+eq('US vis 1 1/2SM', us.visSm, 1.5);
+eq('US thunderstorm', us.wx[0].text, 'heavy thunderstorm with rain');
+eq('US ceiling', us.ceilingFt, 800);
+eq('US category IFR', us.category, 'IFR');
+eq('US negative temp', us.temp, -2);
+near('US altimeter → hPa', us.qnh, 1013.2, 0.1);
+eq('US T-group precise temp', us.tempExact, -1.7);
+eq('US T-group precise dew', us.dewExact, -5);
+const mps = C.parseMetar('UUEE 271430Z 18005MPS CAVOK M10/M15 Q1030');
+near('wind in m/s → kt', mps.wind.speed, 9.72, 0.01);
+eq('CAVOK', mps.cavok, true);
+eq('VCSH', C.decodeWx('VCSH'), 'showers in the vicinity');
+eq('FZFG', C.decodeWx('FZFG'), 'freezing fog');
+eq('LIFR by visibility', C.parseMetar('EGLL 271420Z 00000KT 0400 FG VV002 08/08 Q1022').category, 'LIFR');
+eq('calm wind', C.parseMetar('EGLL 271420Z 00000KT 0400 FG VV002 08/08 Q1022').wind.calm, true);
+
+// Radio navigation
+near('DME overhead: 1 NM DME at 1 NM height', C.dmeGround({ dmeNm: 1, heightFt: C.K.FT_PER_NM }).groundNm, 0, 1e-9);
+near('DME slant: 10 NM at 6076 ft', C.dmeGround({ dmeNm: 10, heightFt: 6076.12 }).groundNm, Math.sqrt(99), 1e-3);
+near('glide path 3° at 5 NM, TCH 50', C.glidePath({ distNm: 5, angleDeg: 3, tchFt: 50 }).heightFt, 50 + 5 * 318.44, 0.5);
+eq('true→mag→compass (VAR 5E, DEV 2W)', JSON.stringify(C.headings({ from: 'true', value: 100, variation: 5, deviation: -2 })), JSON.stringify({ trueHdg: 100, magHdg: 95, compassHdg: 97 }));
+eq('compass→true', C.headings({ from: 'compass', value: 97, variation: 5, deviation: -2 }).trueHdg, 100);
+eq('NDB QDM = MH + RB', C.ndbBearing({ heading: 350, relBearing: 30 }).qdm, 20);
+eq('NDB QDR', C.ndbBearing({ heading: 350, relBearing: 30 }).qdr, 200);
+
+// Operations
+eq('wake cat 737', C.wakeCategory(79000), 'M');
+eq('wake cat 777', C.wakeCategory(351534), 'H');
+eq('wake cat C172', C.wakeCategory(1157), 'L');
+eq('M behind H: 5 NM', C.wakeSeparation('H', 'M').distanceNm, 5);
+eq('L behind J: 8 NM', C.wakeSeparation('J', 'L').distanceNm, 8);
+eq('H behind M: none', C.wakeSeparation('M', 'H').wakeApplies, false);
+const oa = C.optimumAltitude({ massKg: 65000, wingArea: 124.6, mach: 0.785, clOpt: 0.52 });
+near('optimum altitude 737-800 at 65 t ≈ FL360', oa.ft, 36000, 900);
+near('lighter → higher (4 % weight ≈ +1000 ft)', C.optimumAltitude({ massKg: 62400, wingArea: 124.6, mach: 0.785, clOpt: 0.52 }).ft - oa.ft, 1000, 250);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

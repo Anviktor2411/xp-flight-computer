@@ -12,7 +12,8 @@
     { id: 'atm', no: '2', title: 'Atmosphere & altimetry' },
     { id: 'spd', no: '3', title: 'Airspeed' },
     { id: 'nav', no: '4', title: 'Navigation' },
-    { id: 'perf', no: '5', title: 'Airliner performance' }
+    { id: 'perf', no: '5', title: 'Airliner performance' },
+    { id: 'wx', no: '6', title: 'Weather & operations' }
   ];
 
   /** Build small HTML helpers bound to the app context (tex renderer, formatters). */
@@ -31,7 +32,11 @@
       ul: items => `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`,
       tryit: links => `<div class="tryit">${links.map(([id, l]) => `<a class="btn" href="#calc.${id}">${l} →</a>`).join('')}</div>`,
       code: s => `<code>${s}</code>`,
-      n: (x, d = 0) => ctx.num(x, d)
+      n: (x, d = 0) => ctx.num(x, d),
+      /** Multiple-choice self-test. qs = [{ q, a: [options], c: index of the right one, why }] */
+      quiz: (qs, title = 'Check yourself') => !qs || !qs.length ? '' : `<section class="quiz"><h2>${title}</h2><ol>${qs.map(q => `<li class="qz" data-c="${q.c}"><p class="qq">${q.q}</p>
+        <div class="qa">${q.a.map((a, i) => `<button type="button" data-i="${i}"><span class="ql">${'ABCD'[i]}</span><span>${a}</span></button>`).join('')}</div>
+        <p class="why" hidden>${q.why || ''}</p></li>`).join('')}</ol><p class="qscore" aria-live="polite"></p></section>`
     };
   }
 
@@ -399,5 +404,384 @@
         '<div class="tryit"><a class="btn" href="#perf.fuel">Fuel plan →</a><a class="btn" href="#calc.fuel">Endurance & range →</a></div>';
     } });
 
-  root.XFC.study = { chapters, topics };
+
+  // ===================================================================== MORE TOPICS
+  T({ id: 'drag', ch: 'pof', no: '1.6', title: 'Drag, the drag curve and best L/D', blurb: 'Parasite and induced drag, the minimum-drag speed, and why slower can need more thrust.',
+    thumb: () => Fg().dragCurve(),
+    render(ctx) {
+      const k = kit(ctx);
+      const vmd = Fg().jetVmd(), d = Fg().jetDrag(vmd), ld = 0.5 * Math.sqrt(Math.PI * 9.45 * 0.8 / 0.022);
+      return k.lead('Drag has two parts that behave in opposite ways. Parasite drag grows with the square of speed; induced drag — the price of making lift — shrinks with it.') +
+        k.fig(Fg().dragCurve(), '<b>Fig. 1.7</b> — Drag of a 65 t narrow-body at sea level (model: C<sub>D0</sub> = 0.022, aspect ratio 9.45, e = 0.8). The total is lowest where the two parts are equal.') +
+        k.eq(R`C_D = C_{D0} + \frac{C_L^2}{\pi A e}`, '1.11') +
+        k.vars([[R`C_{D0}`, 'zero-lift (parasite) drag coefficient: skin friction, form and interference drag'], ['A', 'aspect ratio b²/S — long, slender wings make less induced drag'], ['e', 'Oswald efficiency factor, about 0.7–0.85']]) +
+        k.p(`Induced drag comes from the wingtip vortices. At low speed the wing needs a high ${k.m('C_L')}, so induced drag is large; at high speed it almost vanishes. Parasite drag does the opposite. The total is smallest at the <b>minimum-drag speed</b> ${k.m(R`V_{md}`)}, where the two are equal and the lift-to-drag ratio is highest:`) +
+        k.eq(R`\left(\frac{L}{D}\right)_{\max} = \frac12\sqrt{\frac{\pi A e}{C_{D0}}}, \qquad C_{L,md} = \sqrt{\pi A e\,C_{D0}}`, '1.12') +
+        k.box('Worked example', k.p(`For the model above ${k.m(R`(L/D)_{\max}`)} = ${k.n(ld, 1)}, reached at ${k.m(R`V_{md}`)} ≈ ${k.n(vmd)} kt EAS, where the drag is ${k.n(d.para + d.ind, 1)} kN — about 1/${k.n(ld)} of the 637 kN weight. A jet gets its best range at about ${k.m(R`1.32\,V_{md}`)}; a propeller aircraft at ${k.m(R`V_{md}`)} itself.`), 'example') +
+        k.h('The back of the drag curve') +
+        k.p(`Below ${k.m(R`V_{md}`)}, slowing down <i>increases</i> drag. If the speed drops, drag rises and the aircraft slows further unless you add thrust: the speed is unstable. That is why approaches are flown with autothrust or an active hand on the thrust levers, and why a low, slow approach can need surprising power.`) +
+        k.box('In X-Plane', k.p(`Hold level flight at several speeds and note the thrust (N1 in ${k.code('sim/cockpit2/engine/indicators/N1_percent')}) it takes: it is lowest near ${k.m(R`V_{md}`)} — for an airliner about the clean manoeuvre speed; Airbus green dot is defined as the best lift-to-drag speed.`), 'xp') +
+        k.tryit([['glide', 'Glide distance']]);
+    },
+    quiz: [
+      { q: 'Parasite drag grows with…', a: ['the speed', 'the square of the speed', '1 / speed²', 'the weight only'], c: 1, why: 'D = ½ρV²S·C<sub>D0</sub>: double the speed, four times the parasite drag.' },
+      { q: 'At the minimum-drag speed…', a: ['induced drag is zero', 'induced and parasite drag are equal', 'parasite drag is zero', 'the wing is at its stall angle'], c: 1, why: 'The two curves cross there, and L/D is at its maximum.' },
+      { q: 'Below Vmd, if the speed drops a little and thrust stays the same…', a: ['drag falls and the aircraft speeds up again', 'drag rises and the aircraft keeps slowing down', 'nothing happens', 'the aircraft climbs'], c: 1, why: 'On the back of the drag curve the speed is unstable: slower means more drag.' }
+    ] });
+
+  T({ id: 'climb', ch: 'pof', no: '1.7', title: 'Climb performance: Vx and Vy', blurb: 'Steepest climb, fastest climb, and what excess thrust and power have to do with it.',
+    thumb: () => Fg().climb(),
+    render(ctx) {
+      const k = kit(ctx), m = Fg().climbModel();
+      return k.lead('An aircraft climbs with whatever thrust is left over after overcoming drag. How much is left over — and at which speed — decides how steeply and how fast it climbs.') +
+        k.fig(Fg().climb(), '<b>Fig. 1.8</b> — Climb angle and rate of climb for a model light single (1157 kg, 180 hp, sea level). Vx gives the steepest path, Vy the most height per minute.') +
+        k.eq(R`\sin\gamma = \frac{T - D}{W}`, '1.13') +
+        k.eq(R`\text{ROC} = V\sin\gamma = \frac{T\,V - D\,V}{W} = \frac{P_{avail} - P_{req}}{W}`, '1.14') +
+        k.p('<b>Vx</b> is the speed of greatest excess <i>thrust</i>: fly it to clear an obstacle. <b>Vy</b> is the speed of greatest excess <i>power</i>: fly it to gain height quickly. A propeller’s thrust falls as speed rises, so a propeller aircraft’s Vx is only a little above the stall; a jet’s thrust is nearly constant, so its Vx is near the minimum-drag speed and its Vy much higher.') +
+        k.box('Worked example', k.p(`The model gives Vx ${k.n(m.vx.kt)} kt (${k.n(m.vx.angle, 1)}° climb) and Vy ${k.n(m.vy.kt)} kt (${k.n(m.vy.roc)} fpm). The Cessna 172S handbook: Vx 62 kt, Vy 74 kt, about 730 fpm at sea level.`), 'example') +
+        k.h('Altitude and ceilings') +
+        k.p('A normally aspirated engine loses power with height, so the excess power shrinks. Vx rises and Vy falls until they meet at the <b>absolute ceiling</b>, where the aircraft can no longer climb. The <b>service ceiling</b> is where the best rate of climb has fallen to 100 fpm.') +
+        k.box('In X-Plane', k.p(`After take-off in the 172, try both speeds: at Vx the nose is high and the ground drops away steeply but slowly; at Vy the vertical speed (${k.code('sim/flightmodel/position/vh_ind_fpm')}) peaks.`), 'xp') +
+        k.tryit([['climb-gradient', 'Climb gradient ⇄ rate']]);
+    },
+    quiz: [
+      { q: 'To clear an obstacle after take-off you fly…', a: ['Vy', 'Vx', 'Vne', 'Vfe'], c: 1, why: 'Vx gives the most height per distance travelled: the steepest climb angle.' },
+      { q: 'As you climb higher, Vx and Vy…', a: ['move further apart', 'come closer and meet at the absolute ceiling', 'stay exactly the same', 'both fall to zero'], c: 1, why: 'Excess power shrinks with height; at the absolute ceiling there is only one speed that holds level flight.' },
+      { q: 'The service ceiling is where the rate of climb has fallen to…', a: ['0 fpm', '100 fpm', '500 fpm', '1000 fpm'], c: 1, why: 'For piston aircraft the service ceiling is defined at 100 fpm (jets often use 500 fpm).' }
+    ] });
+
+  T({ id: 'stability', ch: 'pof', no: '1.8', title: 'Stability, trim and the centre of gravity', blurb: 'Why the CG must sit ahead of the neutral point, and what the tail is really doing.',
+    thumb: () => Fg().stability(),
+    render(ctx) {
+      const k = kit(ctx);
+      const W = 1100, d = 0.10, lt = 4.5, tail = W * d / lt;
+      return k.lead('A stable aircraft returns to its trimmed attitude after a gust. In pitch, that depends almost entirely on where the centre of gravity is.') +
+        k.fig(Fg().stability(), '<b>Fig. 1.9</b> — Wing lift, weight and the tail load in balance. The distance from the CG to the neutral point is the static margin.') +
+        k.p('Wing lift acts at the aerodynamic centre, about a quarter of the way back along the mean chord. With the CG ahead of it, the lift makes a nose-down moment that a small down-load on the tail balances. If a gust raises the nose, both the wing and the tail meet the air at a bigger angle; with the CG ahead of the <b>neutral point</b>, the tail’s extra lift wins and pushes the nose back down.') +
+        k.eq(R`K_n = \frac{x_{NP} - x_{CG}}{\bar c}`, '1.15') +
+        k.eq(R`L_t = \frac{W\,(x_{CG} - x_{ac})}{l_t} \qquad (\text{negative} = \text{down-load})`, '1.16') +
+        k.vars([['K_n', 'static margin, fraction of the mean aerodynamic chord — positive means stable'], [R`x_{NP},\ x_{CG},\ x_{ac}`, 'positions of the neutral point, CG and wing aerodynamic centre'], ['l_t', 'tail arm, CG to the tail’s aerodynamic centre']]) +
+        k.box('Worked example', k.p(`A ${W} kg single with its CG ${d} m ahead of the aerodynamic centre and a ${lt} m tail arm needs a tail down-load of about ${k.n(tail)} kg-force. The wing must now lift ${k.n(W + tail)} kg, so the stall speed rises by ${k.n((Math.sqrt((W + tail) / W) - 1) * 100, 1)} %. Move the CG to the forward limit and the effect doubles.`), 'example') +
+        k.ul(['<b>Forward limit</b> — set by elevator power (can you still flare with idle power?) and nose-gear loads. Forward CG: more tail load, higher stall speed, more fuel burn.', '<b>Aft limit</b> — set by stability and stall recovery. Aft CG: light, twitchy pitch control; behind the neutral point the aircraft diverges by itself.', '<b>Trim</b> removes the control force for the chosen speed; it does not change how stable the aircraft is.']) +
+        k.box('In X-Plane', k.p('In <b>Flight → Flight Configuration → Weight, Balance & Fuel</b>, move the CG slider and fly a few circuits: an aft CG makes pitch light and twitchy, a forward one makes the flare heavy. Airliners like the A330 and MD-11 pump fuel into a tail tank to cruise with an aft CG and less trim drag.'), 'xp') +
+        k.tryit([['wb', 'Mass & balance']]);
+    },
+    quiz: [
+      { q: 'For static stability in pitch the CG must be…', a: ['behind the neutral point', 'ahead of the neutral point', 'exactly on the neutral point', 'below the wing'], c: 1, why: 'A positive static margin (CG ahead of the neutral point) makes the aircraft return after a disturbance.' },
+      { q: 'A forward CG…', a: ['lowers the stall speed', 'raises the stall speed and makes the flare heavier', 'has no effect on performance', 'makes the aircraft unstable'], c: 1, why: 'More tail down-load means the wing must lift more than the weight.' }
+    ] });
+
+  T({ id: 'vspeeds', ch: 'spd', no: '3.3', title: 'V-speeds and the airspeed indicator', blurb: 'What every V means, the colour arcs, and why manoeuvring speed drops with weight.',
+    thumb: () => Fg().asi({ vso: 48, vs1: 53, vfe: 85, vno: 129, vne: 163 }),
+    render(ctx) {
+      const k = kit(ctx);
+      const va = 53 * Math.sqrt(3.8), va2 = 105 * Math.sqrt(907 / 1157);
+      return k.lead('V-speeds are the limits and targets every pilot learns by heart. The most important are painted on the airspeed indicator; the rest are on a card, in the FMS or in your head.') +
+        k.fig(Fg().asi({ vso: 48, vs1: 53, vfe: 85, vno: 129, vne: 163, notes: ['Cessna 172S: Vx 62 · Vy 74 · best glide 68 · Va 105 kt'] }), '<b>Fig. 3.4</b> — The Cessna 172S airspeed indicator: white, green and yellow arcs and the red line.') +
+        k.vars([[R`V_{SO}`, 'stall speed in the landing configuration — bottom of the white arc'], [R`V_{S1}`, 'stall speed in a specified (usually clean) configuration — bottom of the green arc'], [R`V_{FE}`, 'maximum speed with flaps extended — top of the white arc'],
+          [R`V_{NO}`, 'maximum structural cruising speed — top of the green arc; above it, smooth air only'], [R`V_{NE}`, 'never-exceed speed — the red line'], [R`V_A`, 'manoeuvring speed: full, single control deflection will stall the wing before it overloads the structure'],
+          [R`V_X,\ V_Y`, 'best angle and best rate of climb'], [R`V_{LO},\ V_{LE}`, 'maximum speed to operate the gear / to fly with it extended'], [R`V_{MCA},\ V_{YSE}`, 'twins: minimum control speed with one engine out (red radial) and best single-engine climb (blue line)'],
+          [R`V_1,\ V_R,\ V_2`, 'jets: decision, rotation and take-off safety speeds'], [R`V_{REF}`, 'landing reference speed, 1.23 × the 1-g stall speed'], [R`V_{MO}/M_{MO}`, 'jets: maximum operating speed and Mach — the barber pole']]) +
+        k.h('Manoeuvring speed') +
+        k.eq(R`V_A = V_S\sqrt{n_{limit}}`, '3.7') + k.eq(R`V_{A2} = V_{A1}\sqrt{\frac{W_2}{W_1}}`, '3.8') +
+        k.p(`At ${k.m('V_A')} a full pull reaches the stall exactly at the limit load factor — 3.8 g for a normal-category aeroplane. Slower, the wing stalls first and protects the structure; faster, the structure can break before the wing stalls. It protects against <i>one</i> full deflection: rapid reversals of the rudder can overload the fin even below ${k.m('V_A')}.`) +
+        k.box('Worked example — Cessna 172S', k.p(`${k.m(R`V_{S1}`)} = 53 kt, so ${k.m(R`V_A = 53\sqrt{3.8}`)} = ${k.n(va)} kt — the handbook gives 105 kt at 1157 kg. At 907 kg it falls to ${k.m(R`105\sqrt{907/1157}`)} = ${k.n(va2)} kt: a lighter aircraft must be flown <i>slower</i> in turbulence.`), 'example') +
+        k.box('In X-Plane', k.p(`The arcs come from Plane Maker: ${k.code('sim/aircraft/view/acf_Vso')}, ${k.code('acf_Vs')}, ${k.code('acf_Vfe')}, ${k.code('acf_Vno')}, ${k.code('acf_Vne')}. The <a href="#study.aircraft">aircraft study page</a> draws the indicator for whatever you fly.`), 'xp') +
+        k.tryit([['va', 'Manoeuvring speed'], ['airspeed', 'Airspeed converter']]);
+    },
+    quiz: [
+      { q: 'The green arc on the airspeed indicator runs from…', a: ['Vso to Vfe', 'Vs1 to Vno', 'Vno to Vne', 'Vx to Vy'], c: 1, why: 'Green is the normal operating range: clean stall speed up to the maximum structural cruising speed.' },
+      { q: 'When the aircraft is lighter, manoeuvring speed…', a: ['rises', 'falls with the square root of the weight', 'stays the same', 'is no longer needed'], c: 1, why: 'The stall speed falls with √W, and Va = Vs·√n, so Va falls too.' },
+      { q: 'On a twin, the blue line marks…', a: ['Vmca', 'Vyse, best rate of climb on one engine', 'Vne', 'Vfe'], c: 1, why: 'The red radial is Vmca; the blue line is Vyse.' }
+    ] });
+
+  T({ id: 'compass', ch: 'nav', no: '4.6', title: 'True, magnetic and compass headings', blurb: 'Variation, deviation, and the turning and acceleration errors of the magnetic compass.',
+    thumb: () => Fg().northArrows(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C, s = ctx.s;
+      const h = C.headings({ from: 'true', value: 70, variation: 8, deviation: 3 });
+      const live = s && Number.isFinite(s.magVar) && Number.isFinite(s.hdgT) ? k.box('Right now', k.p(`True heading ${ctx.hdg(s.hdgT)}, magnetic ${ctx.hdg(s.hdgM)}: variation ${k.n(Math.abs(s.magVar), 1)}° ${s.magVar >= 0 ? 'east' : 'west'} here.`), 'xp') : '';
+      return k.lead('There are three norths: true north, the pole the chart is drawn to; magnetic north, where a compass needle points; and compass north, where <i>your</i> compass points, pulled aside by the aircraft’s own metal and wiring.') +
+        k.fig(Fg().northArrows(), '<b>Fig. 4.6</b> — Variation separates true and magnetic north; deviation separates magnetic and compass north. Angles exaggerated.') +
+        k.eq(R`\text{True} = \text{Magnetic} + \text{VAR}_{E}`, '4.10') + k.eq(R`\text{Magnetic} = \text{Compass} + \text{DEV}_{E}`, '4.11') +
+        k.p('Both are counted positive to the east. Variation depends on where you are — it passes 20° in parts of Canada and Scandinavia — and drifts slowly year by year. Deviation depends on the heading and the individual aircraft; it is written on the compass card in the cockpit.') +
+        k.box('Worked example', k.p(`Course 070° true, variation 8° E, deviation 3° E: magnetic ${ctx.hdg(h.magHdg)}, compass ${ctx.hdg(h.compassHdg)}. With 3° W deviation instead, the compass heading would be 065°.`), 'example') +
+        k.h('Compass errors') +
+        k.ul(['<b>Acceleration error</b> (northern hemisphere): accelerate on an east or west heading and the compass swings towards north; decelerate and it swings south — <b>ANDS</b>.', '<b>Turning error</b>: turning onto north, roll out <i>before</i> the compass reads north; onto south, <i>after</i> it — <b>UNOS</b> (undershoot north, overshoot south).', 'Both come from the magnetic dip. They reverse in the southern hemisphere and vanish near the magnetic equator.']) +
+        k.box('Which north is used where', k.ul(['Runway numbers, ATC headings and airways: magnetic (true in the far north of Canada).', 'METAR and TAF winds: true. ATIS and tower winds: magnetic.', 'Great-circle courses and GPS tracks: true, converted by the avionics.'])) +
+        live + k.box('In X-Plane', k.p(`${k.code('sim/flightmodel/position/psi')} is the true heading, ${k.code('sim/flightmodel/position/mag_psi')} the magnetic one, and ${k.code('sim/cockpit2/gauges/indicators/compass_heading_deg_mag')} what the wet compass shows — with its errors.`), 'xp') +
+        k.tryit([['compass', 'Heading converter']]);
+    },
+    quiz: [
+      { q: 'True course 070°, variation 8° E. What is the magnetic course?', a: ['062°', '078°', '070°', '252°'], c: 0, why: 'True = magnetic + east variation, so magnetic = 070 − 8 = 062°. East is least.' },
+      { q: 'Northern hemisphere, heading east, you accelerate. The compass shows…', a: ['a turn towards north', 'a turn towards south', 'no change', 'a turn to the east'], c: 0, why: 'ANDS: accelerate north, decelerate south.' },
+      { q: 'Runway numbers are based on…', a: ['true headings', 'magnetic headings', 'compass headings', 'grid headings'], c: 1, why: 'Runway 26 has a magnetic heading of about 260° (true is used only in a few polar regions).' }
+    ] });
+
+  T({ id: 'radio-nav', ch: 'nav', no: '4.7', title: 'VOR, DME and NDB', blurb: 'Radials, DME slant range and relative bearings.',
+    thumb: () => Fg().vorDme(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C;
+      const d = C.dmeGround({ dmeNm: 10, heightFt: 20000 }), nb = C.ndbBearing({ heading: 350, relBearing: 30 });
+      return k.lead('Before GPS every airway was built on ground beacons, and they remain the independent backup today.') +
+        k.fig(Fg().vorDme(), '<b>Fig. 4.7</b> — Left: an aircraft on the 060 radial of a VOR, flying inbound on 240°. Right: DME measures the slant range, not the distance over the ground.') +
+        k.h('VOR') + k.p('A VOR transmits two signals whose phase difference depends on the direction from the station, so the receiver knows which <b>radial</b> it is on — the magnetic bearing <i>from</i> the station, whatever the aircraft’s heading. The course deviation indicator shows how far you are from the selected course (full scale ±10°) and a TO/FROM flag.') +
+        k.h('DME') + k.p('DME times a radio pulse to the station and back, so it measures the straight-line <b>slant range</b>:') +
+        k.eq(R`d_{ground} = \sqrt{d_{DME}^{\,2} - h^2}, \qquad h\,[\text{NM}] = \frac{h\,[\text{ft}]}{6076}`, '4.12') +
+        k.box('Worked example', k.p(`10 NM on the DME at FL200 (${k.n(d.heightNm, 2)} NM up): ${k.n(d.groundNm, 2)} NM over the ground, an error of ${k.n(d.errorNm, 2)} NM. Directly overhead at FL200 the DME still reads ${k.n(d.heightNm, 1)} NM. The error is small once you are further out than 1 NM per 1000 ft of height.`), 'example') +
+        k.h('NDB and ADF') + k.p('An NDB is a simple beacon; the ADF needle points at it. The needle shows the <b>relative bearing</b>, measured clockwise from the nose, so the bearing to the station depends on your heading:') +
+        k.eq(R`\text{QDM} = \text{MH} + \text{RB}, \qquad \text{QDR} = \text{QDM} \pm 180^\circ`, '4.13') +
+        k.p(`Heading 350° with the needle 30° right of the nose: QDM ${ctx.hdg(nb.qdm)}, QDR ${ctx.hdg(nb.qdr)}.`) +
+        k.box('Range', k.p(`VOR and DME are line-of-sight: about ${k.m(R`1.23\sqrt{h_{ft}}`)} NM — some 123 NM at 10 000 ft. NDBs follow the ground and reach further, but thunderstorms and dusk make them wander.`)) +
+        k.box('In X-Plane', k.p(`Tune NAV1 to a VOR and watch ${k.code('sim/cockpit2/radios/indicators/nav1_hdef_dots_pilot')} (needle deflection in dots); the ADF needle is ${k.code('sim/cockpit2/radios/indicators/adf1_relative_bearing_deg')}.`), 'xp') +
+        k.tryit([['dme', 'DME slant range'], ['ndb', 'NDB bearings'], ['horizon', 'Radio range']]);
+    },
+    quiz: [
+      { q: 'A VOR radial is…', a: ['the magnetic bearing to the station', 'the magnetic bearing from the station', 'your heading when tuned', 'a true bearing'], c: 1, why: 'Radial 060 runs outbound from the station on 060° magnetic.' },
+      { q: 'Directly over a DME station at FL180 the DME reads about…', a: ['0 NM', '3 NM', '18 NM', 'nothing'], c: 1, why: '18 000 ft ÷ 6076 ≈ 3 NM: DME measures slant range.' },
+      { q: 'Heading 350°, ADF relative bearing 030°. The magnetic bearing to the NDB (QDM) is…', a: ['020°', '320°', '200°', '030°'], c: 0, why: 'QDM = MH + RB = 350 + 30 = 380 → 020°.' }
+    ] });
+
+  T({ id: 'ils', ch: 'nav', no: '4.8', title: 'The ILS and approach categories', blurb: 'Localiser and glide path, decision heights, and the A–E approach speed categories.',
+    thumb: () => Fg().ils(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C;
+      const g3 = C.glidePath({ distNm: 3, tchFt: 50, gs: 140 });
+      const cats = [['CAT I', 'not below 200 ft', 'RVR ≥ 550 m (or visibility ≥ 800 m)'], ['CAT II', '100–200 ft', 'RVR ≥ 300 m'], ['CAT IIIA', 'below 100 ft or none', 'RVR ≥ 175 m'], ['CAT IIIB', 'below 50 ft or none', 'RVR 50–175 m']];
+      const ac = [['A', 'below 91 kt', 'Cessna 172, light singles'], ['B', '91–120 kt', 'King Air, ATR 72'], ['C', '121–140 kt', 'most narrow-bodies: 737, A320'], ['D', '141–165 kt', 'large wide-bodies: 777, 747'], ['E', '166–210 kt', 'some military jets']];
+      const tbl = (h, rows) => `<div class="scroll-x"><table class="t"><thead><tr>${h.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(x => `<td>${x}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      return k.lead('The instrument landing system gives a precise path to the runway: the localiser guides left and right, the glide slope up and down.') +
+        k.fig(Fg().ils(), '<b>Fig. 4.8</b> — A 3° glide path from 5 NM: the height above the threshold at each mile, the CAT I decision altitude and the marker beacons.') +
+        k.eq(R`h = \text{TCH} + d\cdot 6076\tan\theta \;\approx\; \text{TCH} + 318\,d`, '4.14') +
+        k.eq(R`VS = GS \times 101.3\tan\theta \;\approx\; 5.3 \times GS`, '4.15') +
+        k.ul(['<b>Localiser</b> — about four times as sensitive as a VOR: full scale is a few degrees either side of the centreline.', '<b>Glide slope</b> — usually 3°, full scale about ±0.7°.', '<b>Distances</b> — marker beacons, a DME or GPS confirm where you are on the path; a height check at a published distance catches a false glide slope.']) +
+        k.box('Worked example', k.p(`At 3 NM on a 3° path with a 50 ft threshold crossing height you should be ${k.n(g3.heightFt)} ft above the threshold. At 140 kt ground speed that takes ${k.n(g3.vs)} fpm.`), 'example') +
+        k.h('Minima') + tbl(['Category', 'Decision height', 'Visibility'], cats) +
+        k.p('Below the decision height you continue only with the required visual references in sight; otherwise you go around. CAT II and III need special aircraft equipment, autoland (CAT III) and crew training.') +
+        k.h('Approach speed categories') + tbl(['Category', 'Vat (1.3 Vso or 1.23 VS1g)', 'Typical aircraft'], ac) +
+        k.p('The category sets the circling area, the missed-approach and visibility minima the chart gives you. It uses the speed at maximum landing weight, not your actual speed.') +
+        k.box('In X-Plane', k.p(`Tune NAV1 to the localiser frequency and set the course; ${k.code('sim/cockpit2/radios/indicators/nav1_hdef_dots_pilot')} and ${k.code('nav1_vdef_dots_pilot')} are the needles in dots.`), 'xp') +
+        k.tryit([['ils', 'Glide path heights'], ['vpath', 'Vertical path to a fix']]);
+    },
+    quiz: [
+      { q: 'On a 3° glide path with a 50 ft TCH, what is your height at 4 NM?', a: ['about 700 ft', 'about 1320 ft', 'about 2000 ft', 'about 4000 ft'], c: 1, why: '50 + 4 × 318 ≈ 1320 ft above the threshold.' },
+      { q: 'The CAT I decision height is not lower than…', a: ['50 ft', '100 ft', '200 ft', '500 ft'], c: 2, why: 'CAT I: DH ≥ 200 ft; CAT II 100–200 ft; CAT III below 100 ft or none.' },
+      { q: 'An aircraft with Vat = 135 kt is in approach category…', a: ['A', 'B', 'C', 'D'], c: 2, why: 'C covers 121–140 kt.' }
+    ] });
+
+  T({ id: 'engines', ch: 'perf', no: '5.6', title: 'Jet engines and thrust', blurb: 'How a turbofan makes thrust, bypass ratio, N1 and EGT, and why thrust falls with height.',
+    thumb: () => Fg().turbofan(),
+    render(ctx) {
+      const k = kit(ctx);
+      const eta = (v0, vj) => 2 / (1 + vj / v0);
+      return k.lead('A jet engine throws air backwards; the reaction pushes the aircraft forwards. A turbofan does most of that with a big fan and only a small, hot core.') +
+        k.fig(Fg().turbofan(), '<b>Fig. 5.6</b> — A high-bypass turbofan. The core (compressor, combustor, turbines) drives the fan; most of the air bypasses the core.') +
+        k.eq(R`F = \dot m\,(V_j - V_0) + (p_e - p_0)\,A_e`, '5.10') +
+        k.eq(R`\eta_p = \frac{2}{1 + V_j/V_0}`, '5.11') +
+        k.vars([[R`\dot m`, 'mass flow of air through the engine, kg/s'], [R`V_j,\ V_0`, 'jet speed and flight speed'], [R`\eta_p`, 'propulsive efficiency: how much of the jet’s energy moves the aircraft']]) +
+        k.p('Thrust needs mass flow times a speed increase; efficiency needs the jet speed close to the flight speed. Accelerating a lot of air a little beats accelerating a little air a lot — that is why fans keep getting bigger and bypass ratios higher.') +
+        k.box('Worked example', k.p(`Flying at 250 m/s, a jet leaving at 350 m/s has ${k.m(R`\eta_p`)} = ${k.n(eta(250, 350) * 100)} %; an old turbojet with a 600 m/s jet only ${k.n(eta(250, 600) * 100)} %.`), 'example') +
+        k.ul(['<b>N1</b> — fan (low-pressure spool) speed in %: the thrust-setting parameter on CFM and GE engines. Older Pratt & Whitney and Rolls-Royce engines use <b>EPR</b>, the engine pressure ratio.', '<b>N2</b> — core (high-pressure spool) speed.', '<b>EGT</b> — exhaust gas temperature: the main limit, and a measure of engine health. The gap to the redline is the EGT margin.', '<b>Flat rating</b> — full thrust is available up to a temperature (about ISA + 15 °C); see <a href="#study.flex">reduced thrust</a>.']) +
+        k.h('Thrust lapse') + k.p('Thrust falls with air density and with speed. At cruise altitude a turbofan gives only about a fifth to a quarter of its sea-level static thrust — enough, because cruise drag is only about 1/17 of the weight.') +
+        k.box('In X-Plane', k.p(`${k.code('sim/cockpit2/engine/indicators/N1_percent')} and ${k.code('sim/cockpit2/engine/indicators/EGT_deg_C')} per engine; the live page shows N1 and fuel flow.`), 'xp');
+    },
+    quiz: [
+      { q: 'Why are modern engine fans so large?', a: ['For looks', 'Moving more air a little is more efficient than a little air a lot', 'To carry fuel', 'To reduce weight'], c: 1, why: 'Propulsive efficiency 2/(1 + Vj/V0) is highest when the jet is only a little faster than the aircraft.' },
+      { q: 'N1 is…', a: ['the core speed', 'the fan (low-pressure spool) speed', 'the exhaust temperature', 'the fuel flow'], c: 1, why: 'N1 is the low-pressure spool, which carries the fan; N2 is the core.' },
+      { q: 'Compared with take-off, the thrust available at cruise altitude is…', a: ['the same', 'much lower', 'higher', 'unlimited'], c: 1, why: 'Thin air means less mass flow: roughly a fifth to a quarter of sea-level thrust.' }
+    ] });
+
+  T({ id: 'cruise', ch: 'perf', no: '5.7', title: 'Cruise: optimum altitude, step climbs and cost index', blurb: 'Why airliners climb as they get lighter, and how the cost index trades fuel for time.',
+    thumb: () => Fg().optAlt(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C;
+      const o70 = C.optimumAltitude({ massKg: 70000, wingArea: 124.6, mach: 0.785 }).ft, o60 = C.optimumAltitude({ massKg: 60000, wingArea: 124.6, mach: 0.785 }).ft;
+      return k.lead('A jet is most efficient when its wing flies at one particular lift coefficient. As fuel burns off and the aircraft gets lighter, the only way to keep that coefficient is to climb.') +
+        k.eq(R`L = \tfrac12\rho V^2 S\,C_L = 0.7\,p\,M^2 S\,C_L`, '5.12') +
+        k.p(`Because ${k.m(R`\tfrac12\rho V^2 = \tfrac{\gamma}{2}\,p\,M^2`)}, lift at a fixed Mach and ${k.m('C_L')} is proportional to the static pressure. So the best pressure falls in step with the weight:`) +
+        k.eq(R`p_{opt} = \frac{W}{0.7\,S\,M^2\,C_{L,opt}}`, '5.13') +
+        k.fig(Fg().optAlt(), '<b>Fig. 5.7</b> — Optimum altitude of a 737-800 at M0.785 as fuel burns off, and the 2000 ft steps actually flown.') +
+        k.box('Worked example', k.p(`737-800 at M0.785 (${k.m(R`C_{L,opt}`)} ≈ 0.52): optimum about FL${Math.round(o70 / 100)} at 70 t and FL${Math.round(o60 / 100)} at 60 t. Roughly 1000 ft higher for every 5 % of weight burned.`), 'example') +
+        k.h('Step climbs') + k.p('Air traffic control does not allow a continuous cruise climb, so airliners step up: 2000 ft at a time under RVSM, keeping the same direction of flight, once the next level is at or only just above the optimum. Cruising 2000 ft below optimum costs about 1–2 % more fuel.') +
+        k.h('Cost index') + k.p('The FMS chooses the cruise speed from the <b>cost index</b>: time-related costs (crew, maintenance, leases) divided by the fuel price. CI 0 flies the maximum-range speed; a high CI flies faster and burns more fuel to save minutes. Long-range cruise is a common compromise: 1 % less range than the maximum for a few percent more speed.') +
+        k.eq(R`\text{specific range} = \frac{V_{TAS}}{\dot m_{fuel}}\ \ \text{NM per kg}`, '5.14') +
+        k.box('In X-Plane', k.p(`Fly the same Mach at two levels and compare fuel flow (${k.code('sim/cockpit2/engine/indicators/fuel_flow_kg_sec')}) and true airspeed: the higher level, if it is within reach of the optimum, gives more miles per kilogram.`), 'xp') +
+        k.tryit([['step-climb', 'Optimum altitude'], ['fuel', 'Fuel endurance & range']]);
+    },
+    quiz: [
+      { q: 'As an airliner burns fuel, its optimum altitude…', a: ['falls', 'rises', 'stays the same', 'becomes the ceiling'], c: 1, why: 'Lighter needs less lift, so the same C<sub>L</sub> is found at a lower pressure — higher up.' },
+      { q: 'Cost index 0 means…', a: ['fly as fast as possible', 'fly the maximum-range speed (minimum fuel)', 'no FMS', 'minimum time'], c: 1, why: 'With time costing nothing, only fuel counts.' },
+      { q: 'About how much lighter must the aircraft get for the optimum to rise 1000 ft?', a: ['0.5 %', '5 %', '25 %', '50 %'], c: 1, why: 'Pressure falls about 3.5–5 % per 1000 ft at cruise levels, and p<sub>opt</sub> is proportional to weight.' }
+    ] });
+
+  T({ id: 'metar', ch: 'wx', no: '6.1', title: 'Reading METAR and TAF', blurb: 'The coded airport weather report and forecast, group by group.',
+    thumb: () => Fg().metarFig(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C;
+      const m = C.parseMetar('EETN 271420Z 24012G22KT 200V280 9999 -SHRA FEW025CB SCT040 BKN080 12/08 Q1009 NOSIG');
+      const cb = C.cloudBase({ tempC: m.temp, dewC: m.dew });
+      const cat = [['VFR', 'ceiling above 3000 ft and visibility above 5 SM'], ['MVFR', 'ceiling 1000–3000 ft or visibility 3–5 SM'], ['IFR', 'ceiling 500–999 ft or visibility 1–3 SM'], ['LIFR', 'ceiling below 500 ft or visibility below 1 SM']];
+      return k.lead('A METAR is an airport’s routine weather observation, issued every 30 or 60 minutes in a compact code. A TAF is the forecast for the same airport, usually for 24 or 30 hours.') +
+        k.fig(Fg().metarFig(), '<b>Fig. 6.1</b> — An example METAR, group by group.') +
+        k.ul(['<b>Wind</b> — direction in degrees <i>true</i> and speed (KT or MPS); G = gusts; VRB = variable; 200V280 = varying between.', '<b>Visibility</b> — metres; 9999 means 10 km or more. US reports use statute miles: 10SM, 1 1/2SM.', '<b>Weather</b> — intensity (− light, + heavy, VC nearby), descriptor (SH showers, TS thunderstorm, FZ freezing, BL blowing…) and phenomenon (RA rain, SN snow, DZ drizzle, BR mist, FG fog…).', '<b>Cloud</b> — FEW 1–2 oktas, SCT 3–4, BKN 5–7, OVC 8, with the base in hundreds of feet above the aerodrome; CB and TCU mark convective cloud.', '<b>Temperature / dew point</b> — M means minus. <b>Q</b> gives QNH in hPa, <b>A</b> in inches.', '<b>Trend</b> — NOSIG, BECMG (becoming) or TEMPO (temporary) for the next two hours.', '<b>CAVOK</b> — visibility 10 km or more, no cloud below 5000 ft, no CB or TCU and no significant weather.']) +
+        k.box('Decoded — computed live', k.p(`Wind ${m.wind.dir}° ${m.wind.speed} kt gusting ${m.wind.gust}, varying ${m.wind.varFrom}°–${m.wind.varTo}° · visibility 10 km or more · ${m.wx.map(w => w.text).join(', ')} · ${m.clouds.map(c => c.cover + ' ' + c.baseFt + ' ft' + (c.type ? ' ' + c.type : '')).join(', ')} · ceiling ${m.ceilingFt} ft · ${m.temp} °C, dew point ${m.dew} °C (humidity ${k.n(m.rh)} %, cumulus base ≈ ${k.n(cb.aglFt)} ft) · QNH ${m.qnh} hPa · ${m.category}.`), 'example') +
+        k.h('Ceiling and flight categories') + k.p('The ceiling is the lowest BKN or OVC layer (or vertical visibility). US flight categories combine it with visibility:') +
+        `<div class="scroll-x"><table class="t"><tbody>${cat.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td></tr>`).join('')}</tbody></table></div>` +
+        k.h('TAF') + k.p('A TAF starts with its validity (for example 2712/2818: from the 27th at 12 UTC to the 28th at 18 UTC), then change groups: <b>FM</b> — from this time, a complete change; <b>BECMG</b> — changing gradually; <b>TEMPO</b> — temporary fluctuations, each under an hour and in total less than half the period; <b>PROB30/40</b> — probability in percent.') +
+        k.box('In X-Plane', k.p(`With real weather on, X-Plane 12 builds its weather from METARs and forecasts. Decode your departure’s METAR with the calculator and compare with what the sim reports at the aircraft (${k.code('sim/weather/aircraft/qnh_pas')}, wind and temperature on the live page).`), 'xp') +
+        k.tryit([['metar', 'METAR decoder'], ['cloud-base', 'Cloud base']]);
+    },
+    quiz: [
+      { q: 'BKN025 means…', a: ['broken cloud at 250 ft', '5–7 oktas of cloud with its base 2500 ft above the aerodrome', '2 oktas at 25 000 ft', 'visibility 2.5 km'], c: 1, why: 'Cloud heights are in hundreds of feet above the aerodrome; BKN is 5–7 oktas.' },
+      { q: 'A visibility group of 9999 means…', a: ['exactly 9999 m', '10 km or more', 'unknown', '9.9 NM'], c: 1, why: '9999 is the code for 10 km or more.' },
+      { q: '12/M02 means…', a: ['12 °C, dew point −2 °C', '12 °C, dew point 2 °C', 'wind 12 kt gusting 2', 'QNH 1202'], c: 0, why: 'M means minus.' }
+    ] });
+
+  T({ id: 'clouds-icing', ch: 'wx', no: '6.2', title: 'Cloud base, humidity and icing', blurb: 'The 400 ft rule, relative humidity, the freezing level and where ice forms.',
+    thumb: () => Fg().cloudBase(),
+    render(ctx) {
+      const k = kit(ctx), C = ctx.C;
+      const cb = C.cloudBase({ tempC: 20, dewC: 12 }), fz = C.cloudBase({ tempC: 15, dewC: 5 });
+      return k.lead('Clouds form where rising air cools to its dew point. The gap between temperature and dew point at the surface tells you roughly how high that is.') +
+        k.fig(Fg().cloudBase(), '<b>Fig. 6.2</b> — A parcel of air rising from the surface: it cools at about 3 °C per 1000 ft while its dew point falls 0.5 °C per 1000 ft; where they meet, cloud forms.') +
+        k.eq(R`h_{base} \approx 400\ \text{ft} \times (T - T_d) \qquad (\approx 125\ \text{m per }^\circ\text{C})`, '6.1') +
+        k.eq(R`RH = 100\,\exp\!\left(\frac{17.625\,T_d}{243.04 + T_d} - \frac{17.625\,T}{243.04 + T}\right)\ \%`, '6.2') +
+        k.box('Worked example', k.p(`Temperature 20 °C, dew point 12 °C: cumulus base about ${k.n(cb.aglFt)} ft above the ground, relative humidity ${k.n(cb.rh)} %. With 15 °C at the surface the freezing level is about ${k.n(Math.round(fz.freezeAglFt / 100) * 100)} ft (2 °C per 1000 ft).`), 'example') +
+        k.h('Icing') +
+        k.ul(['Airframe ice needs visible moisture — cloud, rain or drizzle — and a surface at or below 0 °C.', 'It is worst from 0 to about −10 °C with large drops; below about −20 °C most cloud is ice crystals that do not stick.', 'Freezing rain (rain falling from a warm layer into sub-zero air) is the most dangerous: clear ice builds fast, also behind the protected leading edges.', 'Carburettor icing needs no cloud: the carburettor cools the air, so it can happen on a humid day at +20 °C or more.']) +
+        k.box('In X-Plane', k.p(`X-Plane 12 models airframe, propeller, pitot and carburettor ice. ${k.code('sim/flightmodel/failures/frm_ice')} shows the ice on the airframe (0–1); switch on ${k.code('sim/cockpit2/ice/ice_pitot_heat_on_pilot')} and the anti-ice before you enter cloud near the freezing level.`), 'xp') +
+        k.tryit([['cloud-base', 'Cloud base & freezing level'], ['metar', 'METAR decoder']]);
+    },
+    quiz: [
+      { q: 'Temperature 18 °C, dew point 10 °C. The cumulus base is about…', a: ['800 ft', '3200 ft', '8000 ft', '18 000 ft'], c: 1, why: '400 ft × (18 − 10) = 3200 ft.' },
+      { q: 'Airframe icing is most likely in cloud between…', a: ['+10 and +20 °C', '0 and −10 °C', '−30 and −40 °C', 'only above 0 °C'], c: 1, why: 'Supercooled drops are most common and largest just below freezing.' },
+      { q: 'Can carburettor icing happen at +20 °C?', a: ['No, never above 0 °C', 'Yes, in humid air', 'Only at night', 'Only in cloud'], c: 1, why: 'Fuel evaporation and the venturi cool the air by 20 °C or more.' }
+    ] });
+
+  T({ id: 'wake', ch: 'wx', no: '6.3', title: 'Wake turbulence and separation', blurb: 'Wingtip vortices, how they move and last, and the spacing ATC uses.',
+    thumb: () => Fg().wake(),
+    render(ctx) {
+      const k = kit(ctx);
+      const G = (m, v, b) => 4 * m * 9.80665 / (Math.PI * 1.225 * v * 0.514444 * b);
+      const g737 = G(60000, 140, 35.8), g380 = G(380000, 140, 79.8);
+      return k.lead('Every wing that makes lift leaves two counter-rotating vortices behind it. Behind a heavy aircraft they can roll a light one past the vertical.') +
+        k.fig(Fg().wake(), '<b>Fig. 6.3</b> — Wingtip vortices seen from behind, and the ICAO separation minima on approach.') +
+        k.eq(R`\Gamma_0 = \frac{4\,W}{\pi\,\rho\,V\,b}`, '6.3') +
+        k.vars([[R`\Gamma_0`, 'circulation (strength) of the wake, m²/s'], ['W', 'weight, N'], ['V', 'true airspeed'], ['b', 'wingspan']]) +
+        k.p('The strength grows with weight and falls with speed and span: the worst wake comes from a <b>heavy, clean, slow</b> aircraft — just after take-off and on the approach.') +
+        k.box('Worked example', k.p(`At 140 kt, a 60 t 737 leaves a wake of about ${k.n(g737)} m²/s; a 380 t A380, despite its much bigger span, about ${k.n(g380)} m²/s — ${k.n(g380 / g737, 1)} times stronger.`), 'example') +
+        k.ul(['Vortices sink about 300–500 fpm and level off some 500–900 ft below the flight path.', 'Near the ground they spread outwards at a few knots; a light crosswind of about 3–5 kt can hold the upwind one over the runway.', 'Behind a larger aircraft, stay at or above its path and land beyond its touchdown point; take off before its rotation point.']) +
+        k.h('Categories and separation') + k.p('ICAO categories by maximum take-off mass: <b>Light</b> up to 7 000 kg, <b>Medium</b> up to 136 000 kg, <b>Heavy</b> above that, and <b>Super</b> for the A380. On approach, radar separation is 4–8 NM behind heavier aircraft (see the figure); departing light and medium aircraft wait 2 minutes behind a heavy. Europe’s RECAT-EU refines this into six categories with shorter spacing.') +
+        k.box('In X-Plane', k.p('Every <a href="#study.aircraft">aircraft study page</a> shows the wake category of the aircraft you fly; the calculator gives the spacing for any pair.'), 'xp') +
+        k.tryit([['wake', 'Wake separation']]);
+    },
+    quiz: [
+      { q: 'The strongest wake comes from an aircraft that is…', a: ['light, fast, flaps out', 'heavy, clean and slow', 'light and slow', 'heavy and fast'], c: 1, why: 'Γ ∝ W / (V·b): heavy and slow; flaps and gear break up the vortices a little.' },
+      { q: 'A medium aircraft following a heavy on approach needs radar separation of…', a: ['3 NM', '4 NM', '5 NM', '8 NM'], c: 2, why: 'ICAO: 5 NM medium behind heavy (6 NM light behind heavy).' },
+      { q: 'Wake vortices from an aircraft in flight…', a: ['rise', 'sink about 300–500 fpm and level off below the path', 'stay at the same level', 'vanish at once'], c: 1, why: 'So stay at or above the path of the aircraft ahead.' }
+    ] });
+
+  // ------------------------------------------------------------ quizzes for the core topics
+  const QUIZ = {
+    forces: [
+      { q: 'In steady, level flight which forces are equal?', a: ['Lift = thrust and weight = drag', 'Lift = weight and thrust = drag', 'All four are equal', 'Lift = drag and weight = thrust'], c: 1, why: 'Unaccelerated flight: the forces cancel in pairs, vertically and horizontally.' },
+      { q: 'At the same density and C<sub>L</sub>, doubling the true airspeed makes lift…', a: ['double', 'four times as large', 'half as large', 'unchanged'], c: 1, why: 'L = ½ρV²S·C<sub>L</sub> — lift goes with the square of speed.' },
+      { q: 'A typical airliner cruise lift coefficient is about…', a: ['0.05', '0.5', '1.5', '3'], c: 1, why: 'Worked out in the example: about 0.5 at FL350.' }
+    ],
+    'lift-curve': [
+      { q: 'What happens beyond the critical angle of attack?', a: ['Lift keeps rising', 'The flow separates and lift falls: the wing stalls', 'Drag disappears', 'The aircraft climbs faster'], c: 1, why: 'The stall is an angle of attack, not a speed.' },
+      { q: 'Halve the speed in level flight. The C<sub>L</sub> needed…', a: ['halves', 'doubles', 'quadruples', 'stays the same'], c: 2, why: 'C<sub>L</sub> = 2W / (ρV²S): half the speed, four times the C<sub>L</sub>.' },
+      { q: 'Trailing-edge flaps mainly…', a: ['raise the lift curve (more camber), increasing C<sub>Lmax</sub>', 'reduce the weight', 'reduce drag', 'move the centre of gravity'], c: 0, why: 'More camber: more lift at every angle and a higher maximum.' }
+    ],
+    stall: [
+      { q: 'A stall speed of 60 kt at maximum weight becomes, 25 % lighter, about…', a: ['45 kt', '52 kt', '60 kt', '69 kt'], c: 1, why: '60 × √0.75 = 52 kt.' },
+      { q: 'In a level 60° banked turn the stall speed increases by about…', a: ['7 %', '19 %', '41 %', '100 %'], c: 2, why: 'n = 2 g, and √2 = 1.41.' },
+      { q: 'Why does the indicated stall speed hardly change with altitude?', a: ['IAS measures dynamic pressure, which is what the wing responds to', 'Air density is the same everywhere', 'The engine compensates', 'It does change a lot'], c: 0, why: 'The wing and the airspeed indicator both feel ½ρV²; TAS rises with altitude, IAS does not.' }
+    ],
+    turning: [
+      { q: 'Double the TAS at the same bank angle. The turn radius…', a: ['doubles', 'quadruples', 'halves', 'stays the same'], c: 1, why: 'r = V² / (g tan φ).' },
+      { q: 'Bank for a rate-one turn at 120 kt TAS (rule of thumb)?', a: ['12°', '19°', '30°', '45°'], c: 1, why: 'TAS / 10 + 7 = 19°.' }
+    ],
+    glide: [
+      { q: 'L/D 17, 6000 ft (about 1 NM) above the ground, still air. Glide distance?', a: ['6 NM', '17 NM', '34 NM', '102 NM'], c: 1, why: 'Distance = height × L/D = 1 NM × 17.' },
+      { q: 'A heavier aircraft with the same maximum L/D glides…', a: ['a shorter distance', 'the same distance, at a higher speed', 'further', 'not at all'], c: 1, why: 'Weight changes the best-glide speed, not the glide ratio.' }
+    ],
+    isa: [
+      { q: 'The ISA temperature at 10 000 ft is about…', a: ['+15 °C', '−5 °C', '−15 °C', '−56.5 °C'], c: 1, why: '15 − 2 × 10 = −5 °C (exactly −4.8 °C).' },
+      { q: 'At about what altitude is the pressure half its sea-level value?', a: ['5 000 ft', '10 000 ft', '18 000 ft', '36 000 ft'], c: 2, why: 'About 500 hPa at 18 000 ft.' },
+      { q: 'Above the tropopause (36 089 ft) ISA temperature…', a: ['keeps falling 2 °C per 1000 ft', 'stays at −56.5 °C', 'rises quickly', 'is 0 °C'], c: 1, why: 'Constant −56.5 °C up to 20 km.' }
+    ],
+    altimetry: [
+      { q: 'With QNH set, on the ground the altimeter shows…', a: ['zero', 'the airfield elevation', 'the pressure altitude', 'the flight level'], c: 1, why: 'QNH gives altitude above mean sea level.' },
+      { q: 'You fly from high to low pressure without resetting the altimeter. You are…', a: ['higher than indicated', 'lower than indicated', 'exactly where indicated', 'upside down'], c: 1, why: 'High to low, look out below.' },
+      { q: 'Flight levels are…', a: ['heights above the ground', 'pressure altitudes with 1013.25 hPa set', 'QNH altitudes', 'true altitudes'], c: 1, why: 'Everyone above the transition level uses the same datum.' }
+    ],
+    'density-altitude': [
+      { q: 'Pressure altitude 5000 ft, OAT 30 °C. Density altitude is about…', a: ['5 000 ft', '6 000 ft', '7 800 ft', '10 000 ft'], c: 2, why: 'ISA +25 °C: about 118.8 ft per °C more.' },
+      { q: 'A high density altitude…', a: ['shortens the take-off', 'lengthens the take-off and reduces the climb', 'only matters for jets', 'lowers the true airspeed'], c: 1, why: 'Thinner air: less lift and power for the same speed.' }
+    ],
+    'temperature-error': [
+      { q: 'On a very cold day the altimeter reads 3000 ft. You are…', a: ['higher than 3000 ft', 'lower than 3000 ft', 'exactly at 3000 ft', 'on the ground'], c: 1, why: 'Cold air is dense: the pressure levels are squeezed together.' },
+      { q: 'The rule of thumb for the cold-temperature correction is…', a: ['4 % of the height per 10 °C below ISA', '1 % per °C above ISA', '10 ft per hPa', 'none is needed'], c: 0, why: 'Add about 4 % of the height above the station for every 10 °C below ISA.' }
+    ],
+    airspeeds: [
+      { q: 'Which speed goes into the wind triangle?', a: ['IAS', 'CAS', 'TAS', 'EAS'], c: 2, why: 'Navigation needs the real speed through the air.' },
+      { q: 'CAS 150 kt at 8000 ft. TAS by the rule of thumb?', a: ['150 kt', '174 kt', '198 kt', '230 kt'], c: 1, why: '+2 % per 1000 ft: 150 × 1.16 = 174 kt.' },
+      { q: 'The pitot tube senses…', a: ['static pressure', 'total pressure (static + dynamic)', 'temperature', 'true airspeed'], c: 1, why: 'The instrument subtracts the static pressure to get the impact pressure.' }
+    ],
+    mach: [
+      { q: 'Climbing at a constant CAS, the Mach number…', a: ['falls', 'rises', 'stays constant', 'becomes zero'], c: 1, why: 'TAS rises and the speed of sound falls.' },
+      { q: 'The speed of sound depends only on…', a: ['pressure', 'temperature', 'humidity', 'the aircraft'], c: 1, why: 'a = √(γRT).' },
+      { q: 'TAT reads warmer than SAT because…', a: ['the probe is heated', 'the air is brought to rest and heats up', 'of sunlight', 'of the engine exhaust'], c: 1, why: 'Ram rise: TAT = SAT(1 + 0.2M²).' }
+    ],
+    'wind-triangle': [
+      { q: 'TAS 120 kt, 25 kt of wind straight across the course. Maximum drift is about…', a: ['5°', '12°', '25°', '45°'], c: 1, why: 'Wind × 60 / TAS = 25 × 60 / 120 = 12.5°.' },
+      { q: 'Winds in METARs are given relative to…', a: ['magnetic north', 'true north', 'the runway', 'the aircraft'], c: 1, why: 'Forecasts and reports are true; ATIS and tower winds are magnetic.' }
+    ],
+    crosswind: [
+      { q: '20 kt of wind at 30° to the runway. The crosswind is…', a: ['5 kt', '10 kt', '17 kt', '20 kt'], c: 1, why: '20 × sin 30° = 10 kt.' },
+      { q: 'Clock code: at 45° off the runway, the crosswind is about … of the wind', a: ['¼', '½', '¾', 'all'], c: 2, why: '45 minutes past the hour = ¾ (sin 45° = 0.71).' }
+    ],
+    'great-circle': [
+      { q: 'On a Mercator chart, a northern-hemisphere great circle…', a: ['is a straight line', 'curves towards the pole', 'curves towards the equator', 'is a spiral'], c: 1, why: 'The shortest path bows poleward on this projection.' },
+      { q: '1-in-60: 3 NM off track after 60 NM. The track error is…', a: ['1°', '3°', '6°', '20°'], c: 1, why: '1 NM in 60 is 1°, so 3 NM is 3°.' }
+    ],
+    holding: [
+      { q: 'Right-hand hold, inbound 360°, arriving on heading 150°. The entry is…', a: ['direct', 'teardrop', 'parallel', 'no entry allowed'], c: 1, why: 'Δ = 150°: between 110° and 180° → teardrop.' },
+      { q: 'The ICAO maximum holding speed up to 14 000 ft is…', a: ['200 kt', '230 kt', '250 kt', '265 kt'], c: 1, why: '230 kt to 14 000 ft, 240 kt to 20 000 ft, 265 kt to 34 000 ft.' },
+      { q: 'The inbound leg at or below 14 000 ft lasts…', a: ['30 s', '1 minute', '1½ minutes', '2 minutes'], c: 1, why: '1½ minutes above 14 000 ft.' }
+    ],
+    descent: [
+      { q: 'How far out do you start a 3° descent to lose 30 000 ft?', a: ['30 NM', '60 NM', 'about 95 NM', '150 NM'], c: 2, why: '30 000 ÷ 318 ≈ 94 NM (3 NM per 1000 ft gives 90).' },
+      { q: 'Vertical speed for a 3° path at 140 kt ground speed?', a: ['500 fpm', 'about 740 fpm', '1000 fpm', '1400 fpm'], c: 1, why: '5.3 × 140 ≈ 740 fpm.' }
+    ],
+    'mass-balance': [
+      { q: 'Why is there a maximum zero-fuel mass?', a: ['To save tyres', 'Fuel in the wings relieves bending, so weight above MZFW must be fuel', 'Because of the landing gear', 'For passenger comfort'], c: 1, why: 'The wing root bending limit.' },
+      { q: 'An aft CG makes the aircraft…', a: ['more stable and heavier in pitch', 'less stable and lighter in pitch', 'no different', 'stall at a higher speed'], c: 1, why: 'Less static margin: lighter controls, less stability.' }
+    ],
+    takeoff: [
+      { q: 'An engine fails before V1. You…', a: ['continue the take-off', 'reject and stop', 'rotate early', 'raise the flaps'], c: 1, why: 'Below V1 the stop fits in the accelerate-stop distance available.' },
+      { q: '10 % heavier: the take-off field length grows by about…', a: ['5 %', '10 %', '21 %', '50 %'], c: 2, why: 'It scales with W²: 1.1² = 1.21.' }
+    ],
+    flex: [
+      { q: 'With an assumed temperature the engines…', a: ['are damaged', 'give less thrust than TOGA, saving wear', 'give more thrust', 'shut down'], c: 1, why: 'Only the thrust the runway needs.' },
+      { q: 'The maximum reduction from full thrust is…', a: ['10 %', '25 %', '50 %', 'unlimited'], c: 1, why: '25 % of the full rated thrust.' },
+      { q: 'Reduced thrust is not allowed on…', a: ['dry runways', 'contaminated runways', 'long runways', 'sea-level airports'], c: 1, why: 'Contaminated runways need full or specific derated thrust.' }
+    ],
+    landing: [
+      { q: 'Vref is…', a: ['1.13 VS1g', '1.23 VS1g in the landing configuration', '1.5 Vs', 'V2 + 10'], c: 1, why: 'A 23 % margin above the 1-g stall speed.' },
+      { q: 'Autobrake 2, dry runway: with reverse thrust the stopping distance is…', a: ['much shorter', 'about the same — autobrake holds the deceleration', 'longer', 'unpredictable'], c: 1, why: 'Reversers just let the brakes work less, unless braking is friction-limited.' },
+      { q: 'In flight, the actual landing distance is multiplied by … to check it fits', a: ['1.0', '1.15', '1.67', '2.0'], c: 1, why: 'A 15 % margin in flight; dispatch uses ÷ 0.6.' }
+    ],
+    fuel: [
+      { q: 'Final reserve fuel for a turbine aircraft is…', a: ['15 minutes', '30 minutes holding at 1500 ft', '45 minutes at cruise', '2 hours'], c: 1, why: 'Piston aircraft carry 45 minutes.' },
+      { q: 'Contingency fuel is typically…', a: ['5 % of the trip fuel', '50 % of the trip fuel', 'the alternate fuel', 'the taxi fuel'], c: 0, why: 'At least 5 minutes of holding.' }
+    ]
+  };
+  for (const t of topics) if (!t.quiz && QUIZ[t.id]) t.quiz = QUIZ[t.id];
+  const chOrder = id => chapters.findIndex(c => c.id === id);
+  const noKey = no => no.split('.').map(Number);
+  topics.sort((a, b) => chOrder(a.ch) - chOrder(b.ch) || noKey(a.no)[1] - noKey(b.no)[1]);
+
+  root.XFC.study = { chapters, topics, kit };
 })(typeof self !== 'undefined' ? self : this);

@@ -367,7 +367,190 @@
     return { distance: d, factors: f };
   }
 
+  // ------------------------------------------------------------------ weather
+  /** Relative humidity (%) from temperature and dew point (Magnus formula, Alduchov & Eskridge constants). */
+  function relHumidity(tC, tdC) {
+    const a = 17.625, b = 243.04;
+    return 100 * Math.exp(a * tdC / (b + tdC) - a * tC / (b + tC));
+  }
+
+  /**
+   * Base of convective (cumulus) cloud. A rising unsaturated parcel cools at the dry adiabatic rate
+   * (≈3 °C/1000 ft) while its dew point falls ≈0.5 °C/1000 ft, so the spread closes at ≈2.5 °C per 1000 ft:
+   * base ≈ 400 ft per °C of spread. Freezing level uses the average environmental lapse (1.98 °C/1000 ft).
+   */
+  function cloudBase({ tempC, dewC, elevFt = 0 }) {
+    const spread = tempC - dewC;
+    const aglFt = Math.max(0, spread) / 2.5 * 1000;
+    const freezeAglFt = tempC > 0 ? tempC / 1.98 * 1000 : 0;
+    return { spread, aglFt, mslFt: elevFt + aglFt, rh: relHumidity(tempC, dewC), baseTempC: tempC - 2.98 * aglFt / 1000,
+             freezeAglFt, freezeMslFt: elevFt + freezeAglFt };
+  }
+
+  const WX = {
+    MI: 'shallow', PR: 'partial', BC: 'patches of', DR: 'low drifting', BL: 'blowing', SH: 'showers of', TS: 'thunderstorm', FZ: 'freezing',
+    DZ: 'drizzle', RA: 'rain', SN: 'snow', SG: 'snow grains', IC: 'ice crystals', PL: 'ice pellets', GR: 'hail', GS: 'small hail', UP: 'unknown precipitation',
+    BR: 'mist', FG: 'fog', FU: 'smoke', VA: 'volcanic ash', DU: 'dust', SA: 'sand', HZ: 'haze', PY: 'spray',
+    PO: 'dust whirls', SQ: 'squalls', FC: 'funnel cloud', SS: 'sandstorm', DS: 'duststorm'
+  };
+  const COVER = { FEW: 'few (1–2 oktas)', SCT: 'scattered (3–4 oktas)', BKN: 'broken (5–7 oktas)', OVC: 'overcast (8 oktas)' };
+
+  function decodeWx(g) {
+    const m = /^(\+|-|VC)?(MI|PR|BC|DR|BL|SH|TS|FZ)?((?:DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)*)$/.exec(g);
+    if (!m || (!m[2] && !m[3])) return null;
+    const ph = (m[3].match(/../g) || []).map(c => WX[c]);
+    let s;
+    if (m[2] === 'TS') s = 'thunderstorm' + (ph.length ? ' with ' + ph.join(' and ') : '');
+    else if (m[2] === 'SH') s = ph.length ? 'showers of ' + ph.join(' and ') : 'showers';
+    else s = [m[2] ? WX[m[2]] : '', ph.join(' and ')].filter(Boolean).join(' ');
+    if (m[1] === '-') s = 'light ' + s; else if (m[1] === '+') s = 'heavy ' + s;
+    if (m[1] === 'VC') s += ' in the vicinity';
+    return s;
+  }
+
+  /** Visibility in statute miles from a US group like "10SM", "1 1/2SM", "M1/4SM", "P6SM". */
+  function smValue(s) {
+    let t = s.replace('SM', ''), less = false, more = false;
+    if (t[0] === 'M') { less = true; t = t.slice(1); }
+    if (t[0] === 'P') { more = true; t = t.slice(1); }
+    let v = 0;
+    for (const part of t.split(' ')) {
+      if (part.includes('/')) { const [a, b] = part.split('/').map(Number); v += a / b; } else v += Number(part);
+    }
+    return { v, less, more };
+  }
+
+  /**
+   * Decode a METAR (ICAO or US style). Returns the fields a pilot needs plus derived values
+   * (ceiling, flight category, humidity). Groups it does not understand are listed in `unknown`.
+   */
+  function parseMetar(text) {
+    const src = String(text || '').toUpperCase().replace(/[=\s]+$/g, '').replace(/\s+/g, ' ').trim();
+    const out = { raw: src, wx: [], clouds: [], rvr: [], unknown: [], remarks: '', trend: '' };
+    if (!src) return Object.assign(out, { error: 'Paste a METAR, for example: EETN 271420Z 24012G22KT 9999 -SHRA FEW025CB SCT040 12/08 Q1009' });
+    let body = src;
+    const rmk = body.indexOf(' RMK ');
+    if (rmk >= 0) { out.remarks = body.slice(rmk + 5); body = body.slice(0, rmk); }
+    const tr = /\s(NOSIG|BECMG|TEMPO)(\s|$)/.exec(body);
+    if (tr) { out.trend = body.slice(tr.index + 1); body = body.slice(0, tr.index); }
+    const tok = body.split(' ');
+    // US visibility may be split: "1 1/2SM"
+    for (let i = 0; i < tok.length - 1; i++) if (/^\d$/.test(tok[i]) && /^\d\/\dSM$/.test(tok[i + 1])) { tok.splice(i, 2, tok[i] + ' ' + tok[i + 1]); }
+    let i = 0;
+    if (tok[i] === 'METAR' || tok[i] === 'SPECI') out.type = tok[i++];
+    if (/^[A-Z][A-Z0-9]{3}$/.test(tok[i] || '')) out.station = tok[i++];
+    for (; i < tok.length; i++) {
+      const g = tok[i];
+      let m;
+      if (!g) continue;
+      if (!out.time && (m = /^(\d{2})(\d{2})(\d{2})Z$/.exec(g))) { out.time = { day: +m[1], hour: +m[2], min: +m[3] }; continue; }
+      if (g === 'AUTO' || g === 'COR' || g === 'NIL') { out[g.toLowerCase()] = true; continue; }
+      if (!out.wind && (m = /^(\d{3}|VRB)(\d{2,3})(?:G(\d{2,3}))?(KT|MPS|KMH)$/.exec(g))) {
+        const f = m[4] === 'MPS' ? 1.943844 : m[4] === 'KMH' ? 1 / 1.852 : 1;
+        out.wind = { dir: m[1] === 'VRB' ? null : +m[1], speed: +m[2] * f, gust: m[3] ? +m[3] * f : null, unit: m[4], calm: +m[2] === 0 && m[1] !== 'VRB' };
+        continue;
+      }
+      if (out.wind && (m = /^(\d{3})V(\d{3})$/.exec(g))) { out.wind.varFrom = +m[1]; out.wind.varTo = +m[2]; continue; }
+      if (g === 'CAVOK') { out.cavok = true; out.visM = 10000; out.visSm = 10000 / 1609.344; continue; }
+      if (out.visM == null && (m = /^(\d{4})(NDV|[NSEW]{1,2})?$/.exec(g))) { out.visM = +m[1] === 9999 ? 10000 : +m[1]; out.visSm = out.visM / 1609.344; out.visPlus = +m[1] === 9999; continue; }
+      if (out.visM == null && /^[MP]?\d+(\s\d)?(\/\d)?SM$/.test(g)) { const s = smValue(g); out.visSm = s.v; out.visM = s.v * 1609.344; out.visPlus = s.more; out.visLess = s.less; out.visUnit = 'SM'; continue; }
+      if ((m = /^R(\d{2}[LCR]?)\/([PM]?)(\d{4})(?:V([PM]?)(\d{4}))?(FT)?(?:\/?([UDN]))?$/.exec(g))) {
+        out.rvr.push({ rwy: m[1], value: +m[3], max: m[5] ? +m[5] : null, ft: !!m[6], trend: m[7] || null, prefix: m[2] || '' });
+        continue;
+      }
+      if ((m = /^(FEW|SCT|BKN|OVC)(\d{3}|\/\/\/)(CB|TCU|\/\/\/)?$/.exec(g))) {
+        out.clouds.push({ cover: m[1], text: COVER[m[1]], baseFt: m[2] === '///' ? null : +m[2] * 100, type: m[3] && m[3] !== '///' ? m[3] : null });
+        continue;
+      }
+      if ((m = /^VV(\d{3}|\/\/\/)$/.exec(g))) { out.vv = m[1] === '///' ? null : +m[1] * 100; out.clouds.push({ cover: 'VV', text: 'sky obscured, vertical visibility', baseFt: out.vv, type: null }); continue; }
+      if (g === 'NSC' || g === 'NCD' || g === 'SKC' || g === 'CLR') { out.noCloud = g; continue; }
+      if ((m = /^(M?\d{2})\/(M?\d{2})?$/.exec(g))) {
+        const t = s => (s[0] === 'M' ? -Number(s.slice(1)) : Number(s));
+        out.temp = t(m[1]); out.dew = m[2] ? t(m[2]) : null; continue;
+      }
+      if ((m = /^Q(\d{4})$/.exec(g))) { out.qnh = +m[1]; continue; }
+      if ((m = /^A(\d{4})$/.exec(g))) { out.altimeterInHg = +m[1] / 100; out.qnh = out.altimeterInHg * K.INHG; continue; }
+      if (/^RE[A-Z]{2,}$/.test(g)) { out.recent = (out.recent || []).concat(decodeWx(g.slice(2)) || g); continue; }
+      if (g === 'WS' || /^(R\d{2}[LCR]?|ALL|RWY)$/.test(g)) { out.windshear = (out.windshear ? out.windshear + ' ' : 'wind shear ') + (g === 'WS' ? '' : g); continue; }
+      const w = decodeWx(g);
+      if (w) { out.wx.push({ code: g, text: w }); continue; }
+      out.unknown.push(g);
+    }
+    // US remark T-group gives tenths: T01230045 → 12.3 / 4.5
+    const tg = /\bT([01])(\d{3})([01])(\d{3})\b/.exec(out.remarks);
+    if (tg) { out.tempExact = (tg[1] === '1' ? -1 : 1) * +tg[2] / 10; out.dewExact = (tg[3] === '1' ? -1 : 1) * +tg[4] / 10; }
+    const ceil = out.clouds.filter(c => (c.cover === 'BKN' || c.cover === 'OVC' || c.cover === 'VV') && c.baseFt != null).map(c => c.baseFt);
+    out.ceilingFt = ceil.length ? Math.min(...ceil) : null;
+    const vis = out.visSm, cf = out.ceilingFt ?? Infinity;
+    if (isNum(vis) || isFinite(cf)) {
+      const v = isNum(vis) ? vis : 99;
+      out.category = cf < 500 || v < 1 ? 'LIFR' : cf < 1000 || v < 3 ? 'IFR' : cf <= 3000 || v <= 5 ? 'MVFR' : 'VFR';
+    }
+    if (isNum(out.temp) && isNum(out.dew)) out.rh = relHumidity(out.tempExact ?? out.temp, out.dewExact ?? out.dew);
+    if (!out.station && !out.wind && out.temp == null) out.error = 'That does not look like a METAR.';
+    return out;
+  }
+
+  // ------------------------------------------------------------ radio navigation
+  /** DME measures slant range. Ground distance = √(DME² − h²), h = height above the station in NM. */
+  function dmeGround({ dmeNm, heightFt }) {
+    const h = heightFt / K.FT_PER_NM;
+    const overhead = dmeNm <= h;
+    const ground = overhead ? 0 : Math.sqrt(dmeNm * dmeNm - h * h);
+    return { heightNm: h, groundNm: ground, errorNm: dmeNm - ground, overhead, errorPct: dmeNm > 0 ? (dmeNm - ground) / dmeNm * 100 : 0 };
+  }
+
+  /** Glide path: height above the threshold at a distance, from the threshold crossing height (TCH). */
+  function glidePath({ distNm, angleDeg = 3, tchFt = 50, gs, thrElevFt = 0 }) {
+    const perNm = K.FT_PER_NM * Math.tan(rad(angleDeg));
+    const h = tchFt + distNm * perNm;
+    return { heightFt: h, altFt: h + thrElevFt, ftPerNm: perNm, vs: isNum(gs) ? vsForAngle(gs, angleDeg) : NaN };
+  }
+
+  /** True ⇄ magnetic ⇄ compass heading. Variation and deviation are east-positive (east is least, west is best). */
+  function headings({ from, value, variation = 0, deviation = 0 }) {
+    let t, m, c;
+    if (from === 'true') { t = value; m = t - variation; c = m - deviation; }
+    else if (from === 'mag') { m = value; t = m + variation; c = m - deviation; }
+    else { c = value; m = c + deviation; t = m + variation; }
+    return { trueHdg: norm360(t), magHdg: norm360(m), compassHdg: norm360(c) };
+  }
+
+  /** NDB/ADF: magnetic bearing to the station = magnetic heading + relative bearing (QDM); from = QDR. */
+  function ndbBearing({ heading, relBearing }) {
+    const qdm = norm360(heading + relBearing);
+    return { qdm, qdr: norm360(qdm + 180) };
+  }
+
+  // ------------------------------------------------------------------ operations
+  /** ICAO wake turbulence category from the maximum take-off mass (Super = A380). */
+  function wakeCategory(mtowKg, isSuper) {
+    if (isSuper) return 'J';
+    return mtowKg >= 136000 ? 'H' : mtowKg > 7000 ? 'M' : 'L';
+  }
+  const WAKE_NAMES = { J: 'Super (A380)', H: 'Heavy', M: 'Medium', L: 'Light' };
+  /** ICAO Doc 4444 wake separation on approach (radar, NM) and departure (minutes). */
+  function wakeSeparation(lead, follow) {
+    const nm = { J: { H: 6, M: 7, L: 8 }, H: { H: 4, M: 5, L: 6 }, M: { L: 5 } };
+    const min = { J: { H: 2, M: 3, L: 3 }, H: { M: 2, L: 2 }, M: { L: 2 } };
+    const d = (nm[lead] || {})[follow];
+    const t = (min[lead] || {})[follow];
+    return { distanceNm: d || null, departureMin: t || null, radarMinimumNm: 3, wakeApplies: !!(d || t) };
+  }
+
+  /**
+   * Optimum cruise altitude: the pressure where the wing flies at its best cruise lift coefficient.
+   * Lift written with Mach and static pressure: L = 0.7·p·S·M²·C_L  (0.7 = γ/2).
+   */
+  function optimumAltitude({ massKg, wingArea, mach, clOpt = 0.52 }) {
+    const W = massKg * K.g0;
+    const p = W / (0.7 * wingArea * mach * mach * clOpt);
+    return { ft: pressureAltM(p) / K.FT, p, hPa: p / 100, delta: p / K.P0 };
+  }
+
   return {
+    relHumidity, cloudBase, parseMetar, decodeWx, WAKE_NAMES,
+    dmeGround, glidePath, headings, ndbBearing, wakeCategory, wakeSeparation, optimumAltitude,
     K, rad, deg, norm360, norm180, clamp, isNum, units,
     isaM, isa, isaTempC, pressureAltM, pressureAltFt, pressureAltitude, densityAltitude, densityAltM,
     qcFromCas, casFromQc, casToMach, machToCas, speedOfSoundKt, casToTas, tasToCas, machToTas, tasToMach,

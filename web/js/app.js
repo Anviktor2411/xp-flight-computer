@@ -7,6 +7,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = x => typeof x === 'number' && isFinite(x);
   const view = () => $('#view');
+  const APP_VERSION = '1.1.0';
 
   // ------------------------------------------------------------------ storage
   const store = {
@@ -147,7 +148,7 @@
     const name = (ac.icao || '????') + ' · ' + (ac.desc || 'Unknown aircraft');
     if (live.src !== 'demo' || !first) toast('Aircraft detected: ' + name + ' — ' + d.label + (d.commercial ? '. Performance calculator ready.' : '.'));
     if (plan.profile === 'auto') resetPlanFor(currentProfile());
-    if (current && (currentRoute.view === 'live' || currentRoute.view === 'perf')) route();
+    if (current !== undefined && (currentRoute.view === 'live' || currentRoute.view === 'perf' || (currentRoute.view === 'study' && currentRoute.sub === 'aircraft'))) route();
   }
 
   function startDemo(quiet) {
@@ -166,6 +167,9 @@
       .then(r => (r.ok ? r.json() : Promise.reject(new Error('no bridge'))))
       .then(cfg => {
         live.bridge = true; live.cfg = cfg;
+        const pb = $('#phoneBtn'); if (pb) pb.hidden = !!cfg.remote;
+        if (cfg.remote) document.documentElement.classList.add('remote');
+        if (currentRoute.view === 'settings' || currentRoute.view === 'perf') route();   // they were drawn before the app answered
         fetch('api/profiles', { cache: 'no-store' }).then(r => r.json()).then(list => {
           const n = A.addUserProfiles(list);
           if (n) toast('Loaded ' + n + ' aircraft profile' + (n > 1 ? 's' : '') + ' from user_profiles.json');
@@ -249,6 +253,7 @@
         </ol>
         ${xp ? `<dl class="kv"><dt>Web API</dt><dd>${esc(xp.webapi)}</dd><dt>UDP</dt><dd>${esc(xp.udp)}</dd><dt>X-Plane host</dt><dd>${esc(xp.host)}</dd></dl>` : ''}
         <div class="row"><button class="btn primary" id="demoBtn" type="button">Run the demo flight</button><a class="btn" href="#calc">Open the calculators</a><a class="btn ghost" href="#study">Study library</a></div>
+        ${bridge && !(live.cfg && live.cfg.remote) ? '<p class="small muted" style="margin:0">Want it on your phone or tablet as a second screen? Open <a href="#settings.phone">Settings → Phone & tablet</a>.</p>' : ''}
       </section>`;
   }
 
@@ -301,10 +306,11 @@
       ac.mtow > 0 ? `<span class="chip plain">MTOW ${esc(num(toDisp('mass', ac.mtow)))} ${esc(qUnit('mass'))}</span>` : '',
       p ? `<span class="chip live">Profile · ${esc(p.name)}</span>` : ''
     ].join('');
+    const study = `<a class="btn" href="#study.aircraft">Study this aircraft</a>`;
     const cta = d.commercial
-      ? `<a class="btn primary" href="#perf">Open performance</a><span class="small muted">${p ? 'matched by ' + esc(d.via) : ''}</span>`
-      : d.category === 'helicopter' ? `<a class="btn" href="#calc.turn">Turn performance</a><a class="btn ghost" href="#calc.altitudes">Density altitude</a>`
-        : `<a class="btn" href="#calc.ga-runway">Runway distances</a><a class="btn ghost" href="#calc.altitudes">Density altitude</a>`;
+      ? `<a class="btn primary" href="#perf">Open performance</a>${study}<span class="small muted">${p ? 'matched by ' + esc(d.via) : ''}</span>`
+      : d.category === 'helicopter' ? `${study}<a class="btn ghost" href="#calc.altitudes">Density altitude</a>`
+        : `${study}<a class="btn ghost" href="#calc.ga-runway">Runway distances</a>`;
     $('#acCard').innerHTML = `
       <div class="sil">${silFor(d.category)}</div>
       <div style="min-width:0">
@@ -431,6 +437,9 @@
     const id = prefix + '-' + i.k;
     if (i.show && !i.show(vals)) return '';
     const hint = i.hint ? `<div class="hint">${esc(i.hint)}</div>` : '';
+    if (i.type === 'text') {
+      return `<div class="field wide" data-k="${i.k}"><label for="${id}">${esc(i.label)}</label><div class="inp"><input id="${id}" data-k="${i.k}" type="text" spellcheck="false" autocapitalize="characters" autocomplete="off" value="${esc(vals[i.k] ?? '')}"></div>${hint}</div>`;
+    }
     if (i.type === 'select') {
       const opts = typeof i.options === 'function' ? i.options(vals) : i.options;
       return `<div class="field" data-k="${i.k}"><label for="${id}">${esc(i.label)}</label><div class="inp"><select id="${id}" data-k="${i.k}">${opts.map(([v, l]) => `<option value="${esc(v)}"${String(vals[i.k]) === String(v) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>${hint}</div>`;
@@ -453,7 +462,7 @@
     else if (r.fmt === 'text') val = esc(r.value);
     else if (r.q) { val = num(toDisp(r.q, r.value), r.d ?? qDec(r.q)); unit = qUnit(r.q) + (r.unitSuffix || ''); }
     else val = isNum(r.value) ? (r.signed && r.value > 0 ? '+' : '') + num(r.value, r.d ?? 0) : '—';
-    return `<div class="res${r.main ? ' main' : ''}${r.tone ? ' ' + r.tone : ''}"><div class="k">${esc(r.label)}</div><div class="v">${val}${unit ? unitHTML(unit) : ''}</div>${r.note ? `<div class="x">${esc(r.note)}</div>` : ''}</div>`;
+    return `<div class="res${r.main ? ' main' : ''}${r.tone ? ' ' + r.tone : ''}"><div class="k">${esc(r.label)}</div><div class="v${r.fmt === 'text' && String(r.value).length > 12 ? ' txt' : ''}">${val}${unit ? unitHTML(unit) : ''}</div>${r.note ? `<div class="x">${esc(r.note)}</div>` : ''}</div>`;
   }
   function stepsHTML(steps) {
     return steps.map((s, i) => `<div class="step"><span class="i">${i + 1}</span><div><div class="t">${esc(s.t)}</div><div class="e">${tex(s.tex, true)}</div></div></div>`).join('');
@@ -517,6 +526,7 @@
         if (follow && def.live && liveNow()) fw.classList.add('following');
         inp.addEventListener(def.type === 'select' ? 'change' : 'input', () => {
           if (def.type === 'select') { vals[def.k] = inp.value; save(); drawFields(); compute(); return; }
+          if (def.type === 'text') { vals[def.k] = inp.value; save(); compute(); return; }
           const raw = parseFloat(inp.value);
           if (!isNum(raw)) return;
           vals[def.k] = def.q ? fromDisp(def.q, raw) : raw;
@@ -545,7 +555,7 @@
     }
     function compute() {
       let out;
-      try { out = c.run(Object.assign({}, vals), { s: live.s }); } catch (e) { out = { error: 'Could not calculate: ' + e.message }; }
+      try { out = c.run(Object.assign({}, vals), { s: live.s, det: live.det }); } catch (e) { out = { error: 'Could not calculate: ' + e.message }; }
       if (out.error) { outEl.innerHTML = `<div class="note bad err">${esc(out.error)}</div>`; return; }
       outEl.innerHTML = `<div class="results">${out.results.filter(r => r.fmt === 'text' || isNum(r.value)).map(resultHTML).join('')}</div>
         ${(out.notes || []).map(t => `<div class="note" style="margin-top:12px">${esc(t)}</div>`).join('')}
@@ -973,57 +983,299 @@
   }
 
   // ================================================================== STUDY
+  function studyCtx(extra) { return Object.assign({ s: live.s, ac: live.ac, det: live.det, profile: currentProfile(), tex, num, hdg, esc, C, P, A }, extra || {}); }
+  function finishLesson(el) {
+    if (window.matchMedia('(max-width: 900px)').matches) { const b = $('#tocBtn'); if (b) { b.style.display = 'flex'; b.onclick = () => { $('#studySide').classList.toggle('open'); }; } }
+    $$('.lesson [data-eq]', el).forEach(n => { n.innerHTML = tex(n.dataset.eq, n.dataset.inline !== '1'); });
+    window.scrollTo(0, 0);
+  }
+  function liveType() { return live.ac && live.det ? X.acStudy.forAircraft(live.ac, live.det) : null; }
+  function libraryHTML() {
+    const AS = X.acStudy, lt = liveType();
+    return AS.GROUPS.map(([g, fn]) => {
+      const items = X.types.list.filter(fn);
+      return `<div class="libgroup"><h3>${esc(g)}</h3><div class="aclib">${items.map(t => {
+        const nm = AS.nameOf(t), codes = (t.icao || (AS.profileOf(t) || {}).icao || []).slice(0, 2).join(' · ');
+        return `<a class="actile${lt && lt.id === t.id ? ' now' : ''}" href="#study.type-${esc(t.id)}" data-t="${esc((nm + ' ' + codes + ' ' + (t.family || '') + ' ' + g).toLowerCase())}"><b>${esc(nm)}</b><span>${esc(codes)}${lt && lt.id === t.id ? ' · loaded now' : ''}</span></a>`;
+      }).join('')}</div></div>`;
+    }).join('');
+  }
+  function heroHTML() {
+    const lt = liveType();
+    if (lt && live.ac) {
+      const d = live.det, nm = X.acStudy.nameOf(lt);
+      return `<a class="panel achero" href="#study.aircraft"><div class="sil">${silFor(d.category)}</div><div style="min-width:0"><div class="eyebrow">${live.src === 'demo' ? 'Demo aircraft' : 'Loaded in X-Plane'}</div>
+        <div class="nm">${esc(nm)}</div><div class="small muted">${lt.auto ? 'Not in the library — the page is built from X-Plane’s aircraft file.' : 'Speeds, stall chart, ' + (lt.cat === 'airliner' ? 'payload–range, ' : '') + 'how to fly it and a quiz.'}</div></div>
+        <span class="btn primary">Study this aircraft →</span></a>`;
+    }
+    return `<div class="panel achero off"><div class="sil">${SIL.airliner}</div><div><div class="eyebrow">Your aircraft</div><div class="nm">Load an aircraft in X-Plane</div>
+      <div class="small muted">Its own study page appears here: speeds, stall chart, how to fly it and a quiz. Or pick one from the <a href="#study" data-jump="library">aircraft library</a> below.</div></div></div>`;
+  }
   function renderStudy(sub) {
     const S = X.study, el = view();
     if (!S) { el.innerHTML = '<p>Study library failed to load.</p>'; return null; }
+    if (sub === 'aircraft' || (sub && sub.indexOf('type-') === 0)) return renderAircraftStudy(sub);
     const topic = sub && S.topics.find(t => t.id === sub);
     const toc = S.chapters.map(ch => `<div class="navgroup"><h4>${esc(ch.no + ' · ' + ch.title)}</h4>${S.topics.filter(t => t.ch === ch.id).map(t => `<a href="#study.${t.id}"${topic && t.id === topic.id ? ' aria-current="page"' : ''}><span class="n">${esc(t.no)}</span>${esc(t.title)}</a>`).join('')}</div>`).join('');
     if (!topic) {
-      el.innerHTML = `<div class="view-head"><div><div class="eyebrow">Study library · ${S.topics.length} topics</div><h1>The theory behind every number</h1>
-        <p>Diagrams, the exact equations the calculators use, worked examples computed live, and where to find each value inside X-Plane.</p></div></div>
-        ${S.chapters.map(ch => `<h2 style="font-size:15px;margin:22px 0 10px">${esc(ch.no)} · ${esc(ch.title)}</h2><div class="study-index">${S.topics.filter(t => t.ch === ch.id).map(t => `
-          <a class="panel tile" href="#study.${t.id}"><div class="thumb">${t.thumb ? t.thumb() : ''}</div><span class="ch">${esc(t.no)}</span><b>${esc(t.title)}</b><span class="small muted">${esc(t.blurb)}</span></a>`).join('')}</div>`).join('')}`;
-      return null;
+      el.innerHTML = `<div class="view-head"><div><div class="eyebrow">Study library · ${S.topics.length} topics · ${X.types.list.length} aircraft</div><h1>The theory behind every number</h1>
+        <p>Diagrams, the exact equations the calculators use, worked examples computed live, where to find each value inside X-Plane — and a short quiz at the end of every page.</p></div>
+        <input class="search study-search" id="studySearch" type="search" placeholder="Search topics and aircraft…" aria-label="Search topics and aircraft"></div>
+        <div id="heroBox">${heroHTML()}</div>
+        ${S.chapters.map(ch => `<section class="chap"><h2 class="chap-h">${esc(ch.no)} · ${esc(ch.title)}</h2><div class="study-index">${S.topics.filter(t => t.ch === ch.id).map(t => `
+          <a class="panel tile" href="#study.${t.id}" data-t="${esc((t.title + ' ' + t.blurb + ' ' + ch.title).toLowerCase())}"><div class="thumb">${t.thumb ? t.thumb() : ''}</div><span class="ch">${esc(t.no)}</span><b>${esc(t.title)}</b><span class="small muted">${esc(t.blurb)}</span></a>`).join('')}</div></section>`).join('')}
+        <section class="chap" id="library"><h2 class="chap-h">Aircraft library</h2><p class="small muted" style="margin:-4px 0 12px">Every type the app knows, from the 172 to the A380. The aircraft you fly opens its own page automatically — types that are not listed get a page built from X-Plane’s data.</p>${libraryHTML()}</section>
+        <p class="small muted" id="noHits" hidden>Nothing matches that search.</p>`;
+      const q = $('#studySearch');
+      q.oninput = () => {
+        const v = q.value.trim().toLowerCase();
+        let hits = 0;
+        $$('.chap', el).forEach(sec => {
+          let any = false;
+          $$('[data-t]', sec).forEach(a => { const m = !v || a.dataset.t.includes(v); a.hidden = !m; if (m) { any = true; hits++; } });
+          $$('.libgroup', sec).forEach(g => { g.hidden = !$$('[data-t]', g).some(a => !a.hidden); });
+          sec.hidden = !any;
+        });
+        $('#heroBox').hidden = !!v;
+        $('#noHits').hidden = hits > 0;
+      };
+      const j = $('[data-jump]', el); if (j) j.onclick = e => { e.preventDefault(); $('#library').scrollIntoView({ behavior: 'smooth' }); };
+      let sig = live.sig;
+      return { tick() { if (live.sig !== sig) { sig = live.sig; const hb = $('#heroBox'); if (hb) hb.innerHTML = heroHTML(); } } };
     }
     const idx = S.topics.indexOf(topic);
     const prev = S.topics[idx - 1], next = S.topics[idx + 1];
-    const ctx = { s: live.s, ac: live.ac, det: live.det, profile: currentProfile(), tex, num, hdg, esc, C, P, A };
+    const ctx = studyCtx();
     let html;
-    try { html = topic.render(ctx); } catch (e) { html = `<div class="note bad">This topic failed to render: ${esc(e.message)}</div>`; }
+    try { html = topic.render(ctx) + S.kit(ctx).quiz(topic.quiz); } catch (e) { html = `<div class="note bad">This topic failed to render: ${esc(e.message)}</div>`; }
     el.innerHTML = `<div class="study"><aside class="side collapsible" id="studySide"><a class="btn ghost" href="#study" style="margin-bottom:8px">← All topics</a>
         <button class="btn ghost" id="tocBtn" type="button" style="display:none;width:100%;justify-content:center;margin-bottom:8px">Show all topics</button>${toc}</aside>
       <article class="lesson"><div class="eyebrow">${esc(topic.no)} · ${esc(S.chapters.find(c => c.id === topic.ch).title)}</div><h1>${esc(topic.title)}</h1>${html}
         <nav class="lesson-nav">${prev ? `<a class="btn" href="#study.${prev.id}">← ${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="btn" href="#study.${next.id}">${esc(next.title)} →</a>` : ''}</nav>
       </article></div>`;
-    if (window.matchMedia('(max-width: 900px)').matches) { const b = $('#tocBtn'); b.style.display = 'flex'; b.onclick = () => { $('#studySide').classList.toggle('open'); }; }
-    $$('.lesson [data-eq]', el).forEach(n => { n.innerHTML = tex(n.dataset.eq, n.dataset.inline !== '1'); });
-    view().scrollTop = 0; window.scrollTo(0, 0);
+    finishLesson(el);
     return null;
   }
 
+  function renderAircraftStudy(sub) {
+    const el = view(), AS = X.acStudy, T = X.types;
+    const lt = liveType();
+    let t = null, liveMatch = false;
+    if (sub === 'aircraft') { t = lt; liveMatch = !!t; }
+    else { t = T.byId[sub.slice(5)] || null; liveMatch = !!(t && lt && lt.id === t.id); }
+    const nav = `<a class="btn ghost" href="#study" style="margin-bottom:8px">← Study library</a>
+      <button class="btn ghost" id="tocBtn" type="button" style="display:none;width:100%;justify-content:center;margin-bottom:8px">Show all aircraft</button>
+      ${lt ? `<div class="navgroup"><h4>Loaded now</h4><a href="#study.aircraft"${sub === 'aircraft' ? ' aria-current="page"' : ''}>${esc(AS.nameOf(lt))}</a></div>` : ''}
+      ${AS.GROUPS.map(([g, fn]) => `<div class="navgroup"><h4>${esc(g)}</h4>${T.list.filter(fn).map(x => `<a href="#study.type-${esc(x.id)}"${sub === 'type-' + x.id ? ' aria-current="page"' : ''}>${esc(AS.nameOf(x))}</a>`).join('')}</div>`).join('')}`;
+    if (!t) {
+      el.innerHTML = `<div class="study"><aside class="side collapsible" id="studySide">${nav}</aside><article class="lesson acpage">
+        <div class="eyebrow">Aircraft study</div><h1>${sub === 'aircraft' ? 'No aircraft loaded yet' : 'Aircraft not found'}</h1>
+        <p class="lead">${sub === 'aircraft' ? 'Start X-Plane and load any aircraft — or run the demo flight — and its study page opens here: speeds, stall chart, how to fly it and a quiz.' : 'That aircraft is not in the library.'}</p>
+        <div class="tryit"><a class="btn" href="#live">Live page</a><a class="btn ghost" href="#study" data-jump="library">Aircraft library</a></div></article></div>`;
+      finishLesson(el);
+      return { tick() { if (sub === 'aircraft' && liveType()) route(); } };
+    }
+    const ctx = studyCtx({ liveMatch });
+    let html;
+    try { html = AS.page(t, ctx); } catch (e) { html = `<div class="note bad">This page failed to render: ${esc(e.message)}</div>`; if (window.console) console.error(e); }
+    el.innerHTML = `<div class="study"><aside class="side collapsible" id="studySide">${nav}</aside>
+      <article class="lesson acpage"><div class="eyebrow">Aircraft study · ${esc(AS.CAT_LABEL[t.cat] || 'Aircraft')}${t.auto ? ' · from X-Plane’s data' : ''}</div><h1>${esc(AS.nameOf(t))}</h1>${html}
+        <nav class="lesson-nav"><a class="btn" href="#study">← Study library</a>${sub !== 'aircraft' && lt ? `<a class="btn" href="#study.aircraft">Your aircraft: ${esc(AS.nameOf(lt))} →</a>` : ''}</nav></article></div>`;
+    finishLesson(el);
+    return null;
+  }
+
+  // quiz answers (delegated, works for topics and aircraft pages)
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.qa button');
+    if (!b) return;
+    const li = b.closest('.qz');
+    if (!li || li.dataset.done) return;
+    li.dataset.done = '1';
+    const c = +li.dataset.c, i = +b.dataset.i;
+    $$('button', li).forEach(x => { x.disabled = true; const k = +x.dataset.i; if (k === c) x.classList.add('right'); else if (k === i) x.classList.add('wrong'); });
+    li.classList.add(i === c ? 'ok' : 'no');
+    const w = $('.why', li); if (w) { w.hidden = false; w.insertAdjacentHTML('afterbegin', `<b>${i === c ? 'Right.' : 'Not quite.'}</b> `); }
+    const qz = li.closest('.quiz'), all = $$('.qz', qz), done = all.filter(x => x.dataset.done), ok = all.filter(x => x.classList.contains('ok'));
+    const sc = $('.qscore', qz);
+    if (sc) sc.textContent = done.length === all.length ? `Score: ${ok.length} of ${all.length}${ok.length === all.length ? ' — well done.' : '. Read the explanations and try the calculators.'}` : `${ok.length} of ${done.length} right so far`;
+  });
+
+  // ================================================================== PHONE & TABLET
+  const phone = { st: null, err: null, t: 0, sig: '' };
+  function lanCall(path, body) {
+    const opt = body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    return fetch(path, opt).then(r => r.json().then(j => {
+      if (!r.ok && !j.lan) throw new Error(j.error || 'HTTP ' + r.status);
+      return j.lan || j;
+    }));
+  }
+  /** QR code as crisp SVG, always black on white so any phone camera can read it. */
+  function qrSVG(text, px) {
+    if (typeof window.qrcode !== 'function') return '';
+    const qr = window.qrcode(0, 'M'); qr.addData(text); qr.make();
+    const n = qr.getModuleCount(), q = 4, N = n + 2 * q;
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + q} ${r + q}h1v1h-1z`;
+    return `<svg class="qr" viewBox="0 0 ${N} ${N}" width="${px}" height="${px}" role="img" aria-label="QR code: ${esc(text)}" shape-rendering="crispEdges"><rect width="${N}" height="${N}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  }
+  const ago = s => (s < 5 ? 'just now' : s < 60 ? s + ' s ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : 'over an hour ago');
+  function phoneChecks(st) {
+    const out = [];
+    if (st.ips.length === 0) out.push(['bad', 'No network address found', 'Connect this PC to your Wi-Fi or router, then press Check again.']);
+    for (const [ip, e] of Object.entries(st.errors || {})) out.push(['bad', 'Could not share on ' + ip, e]);
+    if (st.primary && st.listening.includes(st.primary)) out.push(['ok', 'Sharing on ' + st.primary + ', port ' + st.port, st.listening.length > 1 ? 'Also on ' + st.listening.filter(i => i !== st.primary).join(', ') : '']);
+    const ch = st.checks;
+    if (!ch) { if (st.checking) out.push(['info', 'Checking the firewall…', '']); }
+    else if (ch.kind === 'windows') {
+      if (ch.error) out.push(['warn', 'Could not read the Windows Firewall settings', ch.error]);
+      else {
+        const nets = ch.networks || [];
+        const pub = nets.find(x => x.category === 'Public');
+        const names = nets.map(x => '“' + x.name + '” (' + (x.category === 'DomainAuthenticated' ? 'domain' : String(x.category || '').toLowerCase()) + ')').join(', ');
+        if (ch.verdict === 'allowed') out.push(['ok', 'Windows Firewall lets phones in', names ? 'Network ' + names : '']);
+        else if (ch.verdict === 'blocked') out.push(['bad', 'Windows Firewall is blocking Python', 'This is the usual reason a phone cannot connect. Press “Fix the Windows Firewall” below.']);
+        else if (ch.verdict === 'ask') out.push(['warn', 'Windows Firewall has no rule for the app yet', (pub ? 'Your network ' + '“' + pub.name + '” is set to Public, where Windows blocks incoming connections. ' : 'Windows may ask whether Python can use the network — click Allow access. ') + 'Press “Fix the Windows Firewall” to set it up now.']);
+        else out.push(['warn', 'No active network', 'Connect this PC to your Wi-Fi or router.']);
+        if ((ch.thirdParty || []).length) out.push(['warn', ch.thirdParty.join(', ') + ' has its own firewall', 'Allow Python (or XP Flight Computer) on private networks in its settings as well.']);
+      }
+    } else if (ch.kind === 'linux') {
+      if (ch.ufw === 'active') out.push(['warn', 'The ufw firewall is on', 'Allow the port once:  sudo ufw allow ' + st.port + '/tcp']);
+      if (ch.firewalld === 'active') out.push(['warn', 'firewalld is on', 'Allow the port:  sudo firewall-cmd --add-port=' + st.port + '/tcp --permanent && sudo firewall-cmd --reload']);
+      if (ch.ufw !== 'active' && ch.firewalld !== 'active') out.push(['ok', 'No ufw or firewalld firewall running', '']);
+    } else if (ch.kind === 'mac' && ch.macFirewall === 'enabled') out.push(['warn', 'The macOS firewall is on', 'If macOS asks whether Python may accept incoming connections, click Allow.']);
+    const cl = st.clients || [];
+    if (cl.length) cl.slice(0, 4).forEach(c => out.push(['ok', 'Connected: ' + c.device + ' (' + c.ip + ')', 'last seen ' + ago(c.ago)]));
+    else out.push(['info', 'No phone or tablet has connected yet', 'Scan the code with the phone’s camera, or type the address.']);
+    return out;
+  }
+  const checkList = items => `<ul class="checks">${items.map(([k, t, d]) => `<li class="${k}"><i aria-hidden="true"></i><div><b>${esc(t)}</b>${d ? `<span>${esc(d)}</span>` : ''}</div></li>`).join('')}</ul>`;
+  function phoneTips(st) {
+    const net = st.primary ? st.primary.split('.').slice(0, 3).join('.') + '.' : null;
+    return `<details class="tips"><summary>Phone still can’t connect?</summary><ol>
+      <li>Use the <b>same Wi-Fi</b> as this PC — not a guest network. Turn off mobile data and VPN apps on the phone while testing.</li>
+      ${net ? `<li>On the phone, open the Wi-Fi details: its address should look like <b>${esc(net)}x</b>. If it doesn’t, the phone is on a different network or router.</li>` : ''}
+      <li>Type the address exactly, starting with <b>http://</b> (not https).</li>
+      <li>iPhone with Chrome, Edge or Firefox: <b>Settings → that browser → Local Network</b> must be on. Safari works without it.</li>
+      <li>The claude.ai link is only a preview with demo data. Your live flight is at the address above.</li>
+      <li>Some routers keep devices apart (“AP isolation” or “client isolation”). Turn it off in the router, or connect the PC and phone to the same router.</li>
+      ${st.os === 'windows' ? '<li>If the Fix button can’t change the firewall, run <b>allow_phone_firewall.bat</b> from the app folder.</li>' : ''}
+    </ol></details>`;
+  }
+  function phoneCard(sec) {
+    const body = $('#phoneBody', sec), chip = $('#phoneChip', sec);
+    if (!live.bridge) {
+      chip.className = 'chip'; chip.textContent = 'needs the app';
+      body.innerHTML = `<p class="small" style="margin-top:0">Use a phone or tablet as a second screen next to X-Plane. Run XP Flight Computer on the PC with X-Plane (<b>start.bat</b>), switch this on there, and scan the code with your phone.</p>
+        <div class="note">This page is a preview with demo data, so it can’t reach X-Plane or be opened by your phone as a live screen.</div>`;
+      return { tick() {} };
+    }
+    let alive = true;
+    const drawMain = st => {
+      const main = $('#phoneMain', sec);
+      if (st.remote) {
+        chip.className = 'chip live'; chip.textContent = 'this device';
+        main.innerHTML = `${checkList([['ok', 'This device is connected to XP Flight Computer on ' + (st.hostname || 'your PC'), 'Live data comes from the PC over your network.']])}
+          <p class="small muted">Tip: add this page to the home screen (Safari: Share → Add to Home Screen · Chrome: ⋮ → Add to home screen) to open it like an app. To switch sharing off or change the connection, use the app on the PC.</p>`;
+        return;
+      }
+      if (!st.enabled) {
+        chip.className = 'chip'; chip.textContent = 'off';
+        main.innerHTML = `<p class="small" style="margin-top:0">Open the app on a phone or tablet on the same Wi-Fi — a second screen for speeds, calculators and study pages while you fly. Right now only this PC can open it.</p>
+          <div class="row"><button class="btn primary" id="lanOn" type="button">Allow phones & tablets</button></div>
+          ${st.os === 'windows' ? '<p class="small muted" style="margin-bottom:0">Windows may ask whether Python can use the network: click <b>Allow access</b>. The check below tells you if anything is still blocking.</p>' : ''}`;
+        return;
+      }
+      chip.className = 'chip live'; chip.textContent = 'on';
+      const url = st.primary ? 'http://' + st.primary + ':' + st.port : null;
+      const others = (st.urls || []).slice(1);
+      main.innerHTML = url ? `<div class="phone-share">
+          <div class="qrbox">${qrSVG(url + '/', 168)}</div>
+          <div class="phone-url">
+            <div class="small muted">Scan with the phone’s camera, or type:</div>
+            <div class="url-line"><code id="phoneUrl">${esc(url)}</code><button class="btn" id="copyUrl" type="button">Copy</button></div>
+            <p class="small muted">Phone and PC must be on the same Wi-Fi.${others.length ? ` Other addresses on this PC (virtual adapters or VPNs — use them only if the first fails): ${others.map(u => esc(u.replace(/\/$/, ''))).join(', ')}.` : ''}</p>
+            <div class="row"><button class="btn" id="lanCheck" type="button">Check again</button>${st.os === 'windows' ? '<button class="btn" id="lanFix" type="button">Fix the Windows Firewall</button>' : ''}<button class="btn ghost" id="lanOff" type="button">Switch off</button></div>
+          </div></div>` : `<div class="row"><button class="btn" id="lanCheck" type="button">Check again</button><button class="btn ghost" id="lanOff" type="button">Switch off</button></div>`;
+    };
+    const drawLive = st => {
+      const box = $('#phoneLive', sec); if (!box) return;
+      if (st.remote || !st.enabled) { box.innerHTML = ''; return; }
+      const fx = st.fix || {};
+      const fixNote = fx.state === 'running' ? `<div class="note warn">${esc(fx.message)} The prompt may be waiting in the taskbar.</div>`
+        : fx.state === 'done' ? `<div class="note ok">${esc(fx.message)}</div>`
+          : fx.state === 'cancelled' || fx.state === 'failed' ? `<div class="note warn">${esc(fx.message)}</div>` : '';
+      box.innerHTML = checkList(phoneChecks(st)) + fixNote + phoneTips(st);
+      const fb = $('#lanFix', sec); if (fb) fb.disabled = fx.state === 'running';
+      const cb = $('#lanCheck', sec); if (cb) cb.disabled = !!st.checking;
+    };
+    const draw = () => {
+      if (!document.body.contains(sec)) { alive = false; return; }
+      const st = phone.st;
+      if (!st) { $('#phoneMain', sec).innerHTML = `<p class="small muted" style="margin:0">${phone.err ? 'Could not reach the app: ' + esc(phone.err) : 'Checking…'}</p>`; return; }
+      const sig = [st.remote, st.enabled, st.primary, st.port, (st.urls || []).join(), st.os].join('|');
+      if (sig !== phone.sig || !$('#phoneMain > *', sec)) { phone.sig = sig; drawMain(st); bind(); }
+      drawLive(st);
+    };
+    const post = (path, body, msg) => lanCall(path, body).then(st => { phone.st = st; if (msg) toast(msg(st)); draw(); }).catch(e => toast('Not changed: ' + e.message));
+    const bind = () => {
+      const on = $('#lanOn', sec); if (on) on.onclick = () => post('api/lan', { enabled: true }, st => (st.primary ? 'Phones on your Wi-Fi can now open http://' + st.primary + ':' + st.port : 'Sharing is on, but this PC has no network address.'));
+      const off = $('#lanOff', sec); if (off) off.onclick = () => post('api/lan', { enabled: false }, () => 'Phones and tablets are switched off.');
+      const ck = $('#lanCheck', sec); if (ck) ck.onclick = () => post('api/lan/recheck', {});
+      const fx = $('#lanFix', sec); if (fx) fx.onclick = () => post('api/lan/fix', {}, () => 'Windows will ask for permission to change the firewall.');
+      const cp = $('#copyUrl', sec);
+      if (cp) cp.onclick = () => {
+        const t = $('#phoneUrl', sec).textContent;
+        const done = () => toast('Copied ' + t);
+        if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, () => selectText($('#phoneUrl', sec)));
+        else selectText($('#phoneUrl', sec));
+      };
+    };
+    const load = () => lanCall('api/lan').then(st => { phone.st = st; phone.err = null; draw(); }).catch(e => { phone.err = e.message; draw(); });
+    body.innerHTML = '<div id="phoneMain"></div><div id="phoneLive"></div>';
+    draw();
+    load().then(() => { const st = phone.st; if (st && st.enabled && !st.remote && !st.checking && (!st.checks || Date.now() / 1000 - st.checks.t > 30)) post('api/lan/recheck', {}); });
+    return {
+      tick() {
+        if (!alive) return;
+        const now = Date.now();
+        if (now - phone.t > 2000 && document.visibilityState !== 'hidden') { phone.t = now; load(); }
+      }
+    };
+  }
+  function selectText(node) {
+    const r = document.createRange(); r.selectNodeContents(node);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    toast('Selected — press Ctrl+C to copy.');
+  }
+
   // ================================================================== SETTINGS
-  function renderSettings() {
+  function renderSettings(sub) {
     const el = view();
     const seg = (key, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-set="${key}" data-v="${v}" aria-pressed="${settings[key] === v}">${l}</button>`).join('')}</div>`;
     const xp = live.raw && live.raw.xp;
     const cfg = live.cfg && live.cfg.config;
+    const remote = !!(live.cfg && live.cfg.remote);
+    const onPc = live.bridge && !remote;
     el.innerHTML = `<div class="view-head"><div><div class="eyebrow">Settings</div><h1>Connection, units & display</h1></div></div>
       <div class="settings">
         <section class="panel pad"><div class="card-h"><h3>X-Plane connection</h3><span class="chip ${xp && xp.connected ? 'live' : demo.running() ? 'warn' : 'bad'}">${xp && xp.connected ? 'connected' : demo.running() ? 'demo' : 'not connected'}</span></div>
-          ${live.bridge ? `<dl class="kv" id="connKv"></dl>
-          <div class="fields" style="margin-top:14px">
+          ${live.bridge ? `<dl class="kv" id="connKv"></dl>` : ''}
+          ${onPc ? `<div class="fields" style="margin-top:14px">
             <div class="field"><label for="cfgHost">X-Plane PC (IP or “auto”)</label><div class="inp"><input id="cfgHost" type="text" value="${esc(cfg ? cfg.xpHost : 'auto')}" style="font-family:var(--font-mono)"></div></div>
             <div class="field"><label for="cfgUdp">UDP port</label><div class="inp"><input id="cfgUdp" type="number" value="${esc(cfg ? cfg.udpPort : 49000)}"></div></div>
             <div class="field"><label for="cfgWeb">Web API port</label><div class="inp"><input id="cfgWeb" type="number" value="${esc(cfg ? cfg.webApiPort : 8086)}"></div></div>
           </div>
           <div class="row" style="margin-top:12px"><button class="btn" id="cfgSave" type="button">Save connection</button><span class="small muted" id="cfgMsg"></span></div>`
-          : `<p class="muted small">This page is not running inside the XP Flight Computer app, so it cannot reach X-Plane. Download the app and run <b>start.bat</b> on the PC with X-Plane.</p>`}
+          : remote ? '<p class="small muted" style="margin-bottom:0">Connection settings can be changed on the PC that runs the app.</p>'
+            : `<p class="muted small">This page is not running inside the XP Flight Computer app, so it cannot reach X-Plane. Download the app and run <b>start.bat</b> on the PC with X-Plane.</p>`}
         </section>
+        <section class="panel pad phone-card" id="phone"><div class="card-h"><h3>Phone & tablet</h3><span class="chip" id="phoneChip">…</span></div><div id="phoneBody"></div></section>
         <section class="panel pad"><div class="card-h"><h3>Runway data</h3></div>
-          ${live.bridge ? `<p class="small muted" style="margin-top:0">Runways are read from X-Plane’s own airport database (apt.dat). Point to your X-Plane 12 folder if it was not found.</p>
+          ${onPc ? `<p class="small muted" style="margin-top:0">Runways are read from X-Plane’s own airport database (apt.dat). Point to your X-Plane 12 folder if it was not found.</p>
           <div class="field"><label for="cfgRoot">X-Plane 12 folder</label><div class="inp"><input id="cfgRoot" type="text" placeholder="D:\\SteamLibrary\\steamapps\\common\\X-Plane 12" value="${esc(cfg ? cfg.xpRoot : '')}" style="font-family:var(--font-mono);font-size:13px"></div></div>
           <div class="row" style="margin-top:10px"><button class="btn" id="rootSave" type="button">Save folder</button><span class="small muted" id="rootMsg">${esc(live.cfg && live.cfg.airports ? live.cfg.airports.state + (live.cfg.airports.root ? ' · ' + live.cfg.airports.root : '') : '')}</span></div>`
-          : '<p class="small muted">Available in the app on your PC.</p>'}
+          : remote ? `<p class="small muted" style="margin:0">Runway lookups use the airport data on the PC${live.cfg.airports ? ' (status: ' + esc(live.cfg.airports.state) + ')' : ''}. The X-Plane folder is set there.</p>` : '<p class="small muted">Available in the app on your PC.</p>'}
         </section>
         <section class="panel pad"><div class="card-h"><h3>Units</h3></div>
           <div class="set-row"><span>Mass & fuel</span>${seg('mass', [['kg', 'kg'], ['lb', 'lb']])}</div>
@@ -1040,8 +1292,8 @@
           <div class="row" style="margin-top:10px">${demo.running() ? '<button class="btn" id="demoStop" type="button">Stop the demo</button>' : xp && xp.connected ? '<button class="btn" type="button" disabled>X-Plane is live — no demo needed</button>' : '<button class="btn primary" id="demoStart" type="button">Start the demo</button>'}</div>
         </section>
         <section class="panel pad"><div class="card-h"><h3>About</h3></div>
-          <p class="small" style="margin-top:0">XP Flight Computer 1.0 · for flight simulation and study only — not for real-world navigation or aircraft operation. Airliner figures are typical public data and estimates.</p>
-          <p class="small muted">Equations rendered with KaTeX (MIT). Type: B612 and B612 Mono (SIL OFL, designed for Airbus cockpit displays), Source Serif 4 (SIL OFL). Runway data comes from your own X-Plane installation.</p>
+          <p class="small" style="margin-top:0">XP Flight Computer ${esc(live.cfg && live.cfg.version ? live.cfg.version : APP_VERSION)} · for flight simulation and study only — not for real-world navigation or aircraft operation. Airliner figures are typical public data and estimates.</p>
+          <p class="small muted">Equations rendered with KaTeX (MIT). QR codes by qrcode-generator (MIT). Type: B612 and B612 Mono (SIL OFL, designed for Airbus cockpit displays), Source Serif 4 (SIL OFL). Runway data comes from your own X-Plane installation.</p>
         </section>
       </div>`;
     $$('[data-set]', el).forEach(b => b.onclick = () => {
@@ -1068,8 +1320,10 @@
         <dt>Web API</dt><dd>${esc(x.webapi)}</dd><dt>UDP</dt><dd>${esc(x.udp)}</dd><dt>Beacon</dt><dd>${esc(x.beacon)}${x.discovered ? ' · found ' + esc(x.discovered.name || '') + ' at ' + esc(x.discovered.ip) : ''}</dd>`;
     };
     kv();
+    const ph = phoneCard($('#phone'));
+    if (sub === 'phone') setTimeout(() => { const p = $('#phone'); if (p) p.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 40);
     let lastKv = 0;
-    return { tick() { const now = Date.now(); if (now - lastKv > 1000) { lastKv = now; kv(); } } };
+    return { tick() { const now = Date.now(); if (now - lastKv > 1000) { lastKv = now; kv(); } ph.tick(); } };
   }
 
   // ================================================================== BOOT
