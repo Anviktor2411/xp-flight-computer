@@ -32,7 +32,8 @@
     atr: ['0', '15', '30']
   };
 
-  const flaps = (spec, def) => Object.entries(spec).map(([id, cl]) => ({ id, cl, def: id === def }));
+  // sorted by lift so '1+F' comes before '2' (object keys that look like numbers would otherwise come first)
+  const flaps = (spec, def) => Object.entries(spec).map(([id, cl]) => ({ id, cl, def: id === def })).sort((a, b) => a.cl - b.cl);
 
   // Family templates ---------------------------------------------------------
   const B737NG = {

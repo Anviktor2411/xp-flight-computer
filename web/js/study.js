@@ -8,13 +8,48 @@
   const Fg = () => root.XFC.figures;
 
   const chapters = [
+    { id: 'start', no: '0', title: 'Start here' },
     { id: 'pof', no: '1', title: 'Principles of flight' },
     { id: 'atm', no: '2', title: 'Atmosphere & altimetry' },
     { id: 'spd', no: '3', title: 'Airspeed' },
     { id: 'nav', no: '4', title: 'Navigation' },
     { id: 'perf', no: '5', title: 'Airliner performance' },
-    { id: 'wx', no: '6', title: 'Weather & operations' }
+    { id: 'wx', no: '6', title: 'Weather & operations' },
+    { id: 'proc', no: '7', title: 'Airliner procedures' }
   ];
+
+  /** Plain text with inline TeX between $…$ (explanations are written this way). */
+  const UNIT_GAP = /(\d) (%|°C|°|kt|ft|NM|kg|hPa|kN|fpm|m\/s²?|m²|m³|km|kW|min|Pa|m|t|g|s|h|W|N|L)(?![\w²³/])/g;
+  const inlineTex = (ctx, s) => String(s == null ? '' : s).split('$')
+    .map((seg, i) => (i % 2 ? ctx.tex(seg, false) : seg.replace(UNIT_GAP, '$1 $2'))).join('');   // keep "10 %" together
+  /** Slider / result labels: escape, and turn C_L or V_S1g into proper subscripts. */
+  const labelHTML = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\b([A-Za-z])_([A-Za-z0-9]+)/g, '$1<sub>$2</sub>');
+
+  /**
+   * The "Explain" panel under a numbered equation: the equation in plain words, what every symbol
+   * means (with units and typical values), why it looks the way it does, and sliders to try it.
+   * Text comes from explain.js; the sliders are wired up by the app after the page renders.
+   */
+  function explainHTML(ctx, no) {
+    const E = root.XFC.explain && root.XFC.explain[no];
+    if (!E) return '';
+    const t = s => inlineTex(ctx, s);
+    const id = 'eqx-' + String(no).replace(/\W/g, '-');
+    const parts = (E.parts || []).map(([sym, what, unit]) =>
+      `<tr><td class="sym">${ctx.tex(sym, false)}</td><td><span class="what">${t(what)}</span>${unit ? `<span class="unit">${t(unit)}</span>` : ''}</td></tr>`).join('');
+    const why = (E.why || []).map(s => `<li>${t(s)}</li>`).join('');
+    const play = E.play ? `<h4>Try it — move the sliders</h4><div class="eqx-play" data-no="${no}">
+        <div class="eqx-ins">${E.play.inputs.map(i => `<div class="eqx-in"><label for="${id}-${i.k}">${labelHTML(i.label)}</label><output for="${id}-${i.k}"></output>
+          <input type="range" id="${id}-${i.k}" data-k="${i.k}" data-unit="${i.unit || ''}" min="${i.min}" max="${i.max}" step="${i.step}" value="${i.v}"></div>`).join('')}
+          <button type="button" class="eqx-reset">Reset</button></div>
+        <div class="eqx-out" aria-live="polite"></div></div>` : '';
+    return `<details class="eqx" id="${id}" data-no="${no}"><summary><span class="eqx-q" aria-hidden="true">?</span><span class="eqx-t">Explain (${no})</span><span class="eqx-sub">in plain words · every symbol · why${E.play ? ' · try it' : ''}</span></summary>
+      <div class="eqx-body"><p class="eqx-words">${t(E.words)}</p>
+        ${parts ? `<h4>What each symbol means</h4><table class="eqx-parts"><tbody>${parts}</tbody></table>` : ''}
+        ${why ? `<h4>Why it looks like this</h4><ol class="eqx-why">${why}</ol>` : ''}
+        ${play}</div></details>`;
+  }
 
   /** Build small HTML helpers bound to the app context (tex renderer, formatters). */
   function kit(ctx) {
@@ -25,12 +60,14 @@
       lead: s => `<p class="lead">${s}</p>`,
       h: s => `<h2>${s}</h2>`,
       fig: (svg, cap) => `<figure class="fig"><div class="draw">${svg}</div><figcaption>${cap}</figcaption></figure>`,
-      eq: (t, no) => { n++; eqNo.push(no); return `<div class="eqn"><div class="m">${ctx.tex(t, true)}</div><div class="no">${no ? '(' + no + ')' : ''}</div></div>`; },
+      eq: (t, no) => { n++; eqNo.push(no); return `<div class="eqn"><div class="m">${ctx.tex(t, true)}</div><div class="no">${no ? '(' + no + ')' : ''}</div></div>` + (no ? explainHTML(ctx, no) : ''); },
+      /** Inline TeX between $…$ inside a sentence. */
+      t: s => inlineTex(ctx, s),
       m: t => ctx.tex(t, false),
       vars: rows => `<table class="vars"><tbody>${rows.map(([a, b]) => `<tr><td>${ctx.tex(a, false)}</td><td>${b}</td></tr>`).join('')}</tbody></table>`,
       box: (title, html, cls = '') => `<div class="box ${cls}"><h3>${title}</h3>${html}</div>`,
       ul: items => `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`,
-      tryit: links => `<div class="tryit">${links.map(([id, l]) => `<a class="btn" href="#calc.${id}">${l} →</a>`).join('')}</div>`,
+      tryit: links => `<div class="tryit">${links.map(([id, l]) => `<a class="btn" href="${id[0] === '#' ? id : '#calc.' + id}">${l} →</a>`).join('')}</div>`,
       code: s => `<code>${s}</code>`,
       n: (x, d = 0) => ctx.num(x, d),
       /** Multiple-choice self-test. qs = [{ q, a: [options], c: index of the right one, why }] */
@@ -681,6 +718,239 @@
       { q: 'Wake vortices from an aircraft in flight…', a: ['rise', 'sink about 300–500 fpm and level off below the path', 'stay at the same level', 'vanish at once'], c: 1, why: 'So stay at or above the path of the aircraft ahead.' }
     ] });
 
+  // ===================================================================== 0 · START HERE
+  T({ id: 'reading-equations', ch: 'start', no: '0.1', title: 'Reading the equations', blurb: 'Greek letters, subscripts, powers and roots, sine and cosine, units — how to read every equation in this library.',
+    thumb: () => Fg().trig(),
+    render(ctx) {
+      const k = kit(ctx);
+      return k.lead('Every equation in this library is a sentence written in shorthand. Learn to read the shorthand and most of the maths turns out to be multiplying and dividing. Under every numbered equation there is an <b>Explain</b> button: it says the equation in plain words, lists what each symbol means and lets you try it with sliders.') +
+        k.h('An equation is a sentence') +
+        k.p('Here is the lift equation from topic 1.1:') +
+        k.eq(R`L = \tfrac12\,\rho\,V^2\,S\,C_L`, '0.1') +
+        k.p('Read it aloud: <i>“lift equals one half, times rho, times V squared, times S, times C-L.”</i> Three rules make that possible:') +
+        k.ul([
+          `<b>Symbols written side by side are multiplied.</b> ${k.m(R`\rho V^2`)} means ${k.m(R`\rho \times V \times V`)} — the × sign is left out to keep things tidy.`,
+          `<b>Every letter stands for a quantity with a unit.</b> ${k.m('V')} is a speed in metres per second, ${k.m('S')} an area in square metres. The Explain panel lists them all, with typical values.`,
+          '<b>The = sign says both sides are the same amount.</b> Change something on the right and the left changes with it.']) +
+        k.h('Greek letters and little labels') +
+        k.p('Aviation borrows Greek letters for quantities whose Latin letter is already taken. These are the ones used in this library:') +
+        k.vars([[R`\alpha`, '<b>alpha</b> — angle of attack'], [R`\gamma`, '<b>gamma</b> — climb or descent angle (and 1.4, a property of air, in the speed-of-sound formula)'],
+          [R`\Delta`, '<b>Delta</b> (capital) — “a change in”: ΔH is a height difference'], [R`\theta`, '<b>theta</b> — an angle, for example between the wind and the runway'],
+          [R`\rho`, '<b>rho</b> — air density'], [R`\sigma`, '<b>sigma</b> — density ratio, ρ ÷ ρ₀'], [R`\phi`, '<b>phi</b> — bank angle (latitude in navigation)'],
+          [R`\lambda`, '<b>lambda</b> — longitude (and the temperature lapse rate)'], [R`\mu`, '<b>mu</b> — friction coefficient'], [R`\omega`, '<b>omega</b> — rate of turn'],
+          [R`\pi`, '<b>pi</b> — 3.14159…, a circle’s circumference ÷ its diameter'], [R`\Gamma`, '<b>Gamma</b> (capital) — the strength of a wake vortex']]) +
+        k.p(`A small letter or number written low after a symbol is a <b>subscript</b>. It is only a label, not maths: ${k.m('V_S')} is “the stall speed”, ${k.m('C_L')} “the lift coefficient”, ${k.m(R`\rho_0`)} “the density at sea level” (a 0 usually marks the standard or starting value), and ${k.m('W_1,\\ W_2')} are the weight before and after.`) +
+        k.h('Powers, roots and how things scale') +
+        k.p(`A small raised number is a <b>power</b>: ${k.m(R`V^2 = V \times V`)}. A <b>square root</b> undoes a square: ${k.m(R`\sqrt{9} = 3`)}. Powers that are not whole numbers, like the 3.5 in the airspeed equations, are smooth in-betweens — the app works them out for you.`) +
+        k.p('The most useful skill is not calculating but <b>scaling</b>: if you know how one quantity depends on another, you can predict the change without the full equation.') +
+        k.eq(R`y = k\,x^{\,n} \quad\Longrightarrow\quad \frac{y_2}{y_1} = \left(\frac{x_2}{x_1}\right)^{n}`, '0.2') +
+        k.fig(Fg().scaling(), '<b>Fig. 0.1</b> — What doubling the input does to the output for the four shapes you meet most: squares grow fast, square roots slowly, “one over” shrinks.') +
+        k.box('Worked example — weight, stall speed and runway', k.p(`Stall speed goes with the square root of weight (1.6). Load 21 % more and the stall speed rises by ${k.m(R`\sqrt{1.21} = 1.10`)} — only 10 %. Take-off distance goes roughly with weight squared (5.4): 10 % heavier needs ${k.m(R`1.1^2 = 1.21`)}, about 21 % more runway.`), 'example') +
+        k.h('Sine, cosine and tangent') +
+        k.p('Wind, climb and glide problems are all right-angled triangles. In such a triangle the ratios of the sides depend only on the angle; sine, cosine and tangent are simply the names of those ratios.') +
+        k.fig(Fg().trig(), '<b>Fig. 0.2</b> — A 20 kt wind 30° off the runway: the wind is the hypotenuse, the headwind the adjacent side and the crosswind the opposite side.') +
+        k.eq(R`\sin\theta = \frac{\text{opposite}}{\text{hypotenuse}}, \qquad \cos\theta = \frac{\text{adjacent}}{\text{hypotenuse}}, \qquad \tan\theta = \frac{\text{opposite}}{\text{adjacent}}`, '0.3') +
+        k.eq(R`\text{crosswind} = W_s\sin\theta, \qquad \text{headwind} = W_s\cos\theta`, '0.4') +
+        k.box('Worth remembering', k.ul([`${k.m(R`\sin 30^\circ = 0.5`)}, ${k.m(R`\sin 45^\circ \approx 0.71`)}, ${k.m(R`\sin 60^\circ \approx 0.87`)}, ${k.m(R`\sin 90^\circ = 1`)} — cosine is the same list backwards.`,
+          'Clock code for crosswind: 15° off the runway → a quarter of the wind, 30° → half, 45° → three quarters, 60° or more → all of it.',
+          `Small angles: ${k.m(R`\sin\theta \approx \tan\theta \approx \theta \div 57.3`)} (the angle in radians). That is the 1-in-60 rule: 1° is 1 unit across for every 60 along.`]), 'example') +
+        k.h('Units: why the equations want metres and seconds') +
+        k.p('Equations that contain physical constants — 1.225, 9.81, 287 — are written in SI units. Convert first, calculate, then convert the answer back:') +
+        k.vars([[R`1\ \text{kt}`, '0.5144 m/s'], [R`1\ \text{ft}`, '0.3048 m'], [R`1\ \text{NM}`, '1852 m'], [R`1\ \text{hPa}`, '100 Pa'], [R`T\,[\text{K}]`, 'T [°C] + 273.15 — temperatures inside formulas are always kelvin'], [R`1\ \text{kg}`, 'weighs 9.81 N on Earth']]) +
+        k.eq(R`W = m\,g, \qquad g = 9.81\ \text{m/s}^2`, '0.5') +
+        k.p('Mass (kilograms) is how much aircraft there is; weight (newtons) is the force the wing has to hold up. The equations need the weight, so the first step is almost always “mass × 9.81”.') +
+        k.h('Rearranging: asking an equation a different question') +
+        k.p('The lift equation gives the lift at a given speed. Turn it round and it gives the speed needed to carry a given weight. Whatever you do to one side, do to the other:') +
+        k.eq(R`W = \tfrac12\rho V^2 S C_L \;\Longrightarrow\; V^2 = \frac{2W}{\rho\,S\,C_L} \;\Longrightarrow\; V = \sqrt{\frac{2W}{\rho\,S\,C_L}}`, '0.6') +
+        k.p('With the maximum lift coefficient this is the stall speed, equation (1.5). Most equations in the library are rearrangements like this one.') +
+        k.h('e and ln') +
+        k.p(`A few equations contain ${k.m('e^{x}')} or ${k.m(R`\ln`)}. The number ${k.m('e')} = 2.718… appears whenever something shrinks or grows by the same <i>fraction</i> for every equal step: above the tropopause air pressure halves about every 14 400 ft (2.3). ${k.m(R`\ln`)} answers the reverse question — how many steps did it take?`) +
+        k.box('How to use the Explain panels', k.ul(['Tap <b>Explain</b> under an equation: the equation in one plain sentence, then every symbol with its unit and a typical value, then why it looks the way it does.', 'Move the sliders under <b>Try it</b> and watch the answer change — the quickest way to get a feel for an equation.', 'The button at the top of each page opens or closes all the explanations at once, and remembers your choice.']), 'xp');
+    },
+    quiz: [
+      { q: 'In ρV², what joins ρ and V²?', a: ['Addition', 'Multiplication', 'It is a label', 'Division'], c: 1, why: 'Symbols side by side are multiplied: ρ × V × V.' },
+      { q: 'What does the little S in V<sub>S</sub> mean?', a: ['V to the power S', 'V times S', 'A label: the stall speed', 'V divided by S'], c: 2, why: 'A subscript only names which V it is.' },
+      { q: 'Lift goes with V². Fly 10 % faster at the same angle of attack and the lift is…', a: ['10 % more', 'about 21 % more', 'twice as much', 'the same'], c: 1, why: '1.1² = 1.21.' },
+      { q: 'A 20 kt wind 30° off the runway gives a crosswind of…', a: ['5 kt', '10 kt', '17 kt', '20 kt'], c: 1, why: '20 × sin 30° = 20 × 0.5 = 10 kt.' },
+      { q: '100 kt in metres per second is about…', a: ['19 m/s', '51 m/s', '100 m/s', '185 m/s'], c: 1, why: '100 × 0.5144 = 51.4 m/s.' }
+    ] });
+
+  // ===================================================================== 7 · AIRLINER PROCEDURES
+  const DEP_REF = { mass: 70000, flap: '5', elevFt: 0, qnh: 1013.25, oatC: 15, headwind: 0 };   // 737-800 at 70 t, sea level, ISA
+  const depRef = (ctx, o) => ctx.P.departureProfile(ctx.A.byId.B738, Object.assign({}, DEP_REF, o));
+  const depThumb = o => root.XFC.perf.departureProfile(root.XFC.aircraft.byId.B738, Object.assign({}, DEP_REF, o));
+
+  T({ id: 'climb-out', ch: 'proc', no: '7.1', title: 'Take-off climb and engine failure', blurb: 'The four take-off segments, minimum climb gradients, why twins have so much thrust, and flying an engine failure after V1.',
+    thumb: () => Fg().toSegments(depThumb({ mass: 79000, proc: 'eo', accFt: 1000 })),
+    render(ctx) {
+      const k = kit(ctx);
+      const eo = depRef(ctx, { mass: 79000, proc: 'eo', accFt: 1000 }), aeo = depRef(ctx, { mass: 79000, proc: 'custom', thrRedFt: 1500, accFt: 1500 });
+      const g = eo.gradients, pc = x => (x * 100).toFixed(1);
+      const ld = 11, tw2 = 2 * (1 / ld + 0.024), tw4 = 4 / 3 * (1 / ld + 0.030);
+      return k.lead('An airliner is certified to lose an engine at the worst moment — just after V1 — and still climb away clear of every obstacle. The climb after take-off is split into segments, and each one has a minimum climb gradient.') +
+        k.fig(Fg().toSegments(eo, aeo), `<b>Fig. 7.1</b> — Engine failure at V1, 737-800 at 79 t, sea level, ISA, flaps 5 — computed with this app’s departure model. <b>1st</b> (amber): gear retracting, gradient must be positive (${pc(g.first)} %). <b>2nd</b> (blue): V2 with take-off flaps up to the engine-out acceleration height (${pc(g.second)} %, minimum 2.4 %). <b>3rd</b> (green): level acceleration while the flaps come up. <b>Final</b> (magenta): clean at maximum continuous thrust to 1500 ft (${pc(g.final)} %, minimum 1.2 %). Dashed: the same aircraft with both engines.`) +
+        k.h('Climb gradient: spare thrust ÷ weight') +
+        k.p('In a steady climb, the thrust that is not needed to beat drag lifts the aircraft. For the small angles airliners fly, the gradient — height gained per distance flown — is simply that spare thrust as a fraction of the weight:') +
+        k.eq(R`\gamma \approx \frac{T - D}{W}`, '7.1') +
+        k.p(`With one of ${k.m('n')} engines failed only ${k.m(R`\tfrac{n-1}{n}`)} of the thrust is left, while the drag grows: the dead engine windmills and the rudder has to hold the aircraft straight.`) +
+        k.eq(R`\gamma_{\text{OEI}} = \frac{\tfrac{n-1}{n}\,T - D - \Delta D_{\text{asym}}}{W}`, '7.2') +
+        k.p(`That is why the loss is so dramatic: for the 737 in the figure, both engines give a gradient of about ${pc(aeo.gradients.aeo)} %, one engine only ${pc(g.second)} %. Half the thrust, but ${Math.round((1 - g.second / aeo.gradients.aeo) * 100)} % of the climb gone — because the drag did not halve.`) +
+        k.h('The segments and their minimum gradients') +
+        `<div class="scroll-x"><table class="t"><thead><tr><th>Segment</th><th>Configuration</th><th class="n">Twin</th><th class="n">Three</th><th class="n">Four</th></tr></thead><tbody>
+          <tr><td>1st</td><td>gear retracting, take-off flaps, V<sub>LOF</sub> → V2</td><td class="n">&gt; 0 %</td><td class="n">0.3 %</td><td class="n">0.5 %</td></tr>
+          <tr><td>2nd</td><td>gear up, take-off flaps, V2, take-off thrust</td><td class="n">2.4 %</td><td class="n">2.7 %</td><td class="n">3.0 %</td></tr>
+          <tr><td>3rd</td><td>level (or slow climb), accelerating, flaps retracting</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+          <tr><td>Final</td><td>clean, maximum continuous thrust, ≥ 1.18 V<sub>SR</sub></td><td class="n">1.2 %</td><td class="n">1.5 %</td><td class="n">1.7 %</td></tr>
+          <tr><td>Net margin</td><td>subtracted from the gross gradient for obstacles</td><td class="n">0.8 %</td><td class="n">0.9 %</td><td class="n">1.0 %</td></tr></tbody></table></div>` +
+        k.p('The second segment is usually the one that limits the weight — at a hot, high airport it can be tighter than the runway. The take-off path ends at 1500 ft above the runway or when the aircraft is clean, whichever is higher, and no flap may move below 400 ft.') +
+        k.h('Why twins have so much spare thrust') +
+        k.p('Turn (7.2) round and ask how much thrust the aircraft needs with all engines so that it still meets the second-segment gradient with one out:') +
+        k.eq(R`\frac{T}{W} \ge \frac{n}{n-1}\left(\frac{1}{L/D} + \gamma_{\min}\right)`, '7.3') +
+        k.box('Worked example', k.p(`With a lift-to-drag ratio of about ${ld} at V2: a twin needs ${k.m(R`T/W \ge 2 \times (0.091 + 0.024) = ${tw2.toFixed(2)}`)}, a four-engine aircraft only ${k.m(R`\tfrac43 \times (0.091 + 0.030) = ${tw4.toFixed(2)}`)}. With everything running, the twin has far more thrust than it needs — which is why a light 737 climbs away so steeply and a 747 more gently.`), 'example') +
+        k.h('The net flight path and obstacles') +
+        k.p('The certified (gross) gradient is what an average aircraft achieves. For obstacle clearance, planners use the net gradient, which is lower by a fixed margin, and the net path must clear every obstacle in the departure area by at least 35 ft:') +
+        k.eq(R`\gamma_{\text{net}} = \gamma_{\text{gross}} - 0.8\,\% \;\;(\text{twin}), \qquad h_{\text{gained}} = \gamma_{\text{net}} \times d \;\ge\; h_{\text{obstacle}} + 35\ \text{ft}`, '7.4') +
+        k.box('Worked example', k.p(`A mast 2 NM (3 704 m) beyond the end of the take-off distance, 200 ft high. With a gross gradient of 2.9 % the net gradient is 2.1 %: the net path gains ${k.m(R`0.021 \times 3704 = 78\ \text{m} = 255\ \text{ft}`)} — clear of 200 + 35 = 235 ft, just. A heavier or hotter departure would need a lower weight, or an engine-out procedure that turns away from the mast.`), 'example') +
+        k.h('Flying an engine failure after V1') +
+        k.ul(['<b>Continue.</b> After V1 the take-off goes on. Rotate at VR a little slower than normal and fly V2 — or the speed you have when it fails, if higher, up to about V2 + 15 kt.',
+          '<b>Keep it straight.</b> Rudder against the yaw (the slip indicator centred; Airbus shows a blue β target), wings level or a few degrees toward the live engine.',
+          '<b>Positive climb → gear up.</b> No flap change and no turn below 400 ft unless the engine-out procedure (EOSID) says so.',
+          '<b>At the engine-out acceleration height</b> (EO ACC, typically 800–1500 ft, set for each runway): level off or reduce the climb, accelerate and retract the flaps on schedule.',
+          '<b>Clean, at green dot / flaps-up speed:</b> set maximum continuous thrust — take-off thrust is limited to 5 minutes, or 10 with an engine out — and climb on the engine-out route.']) +
+        k.box('In X-Plane', k.ul([`The Failures screen (Flight menu) can fail an engine at a chosen speed — set it to your V1. The dataref is ${k.code('sim/operation/failures/rel_engfai0')} for engine 1.`,
+          `Watch ${k.code('sim/cockpit2/gauges/indicators/slip_deg')} (the ball) and ${k.code('sim/flightmodel/position/vh_ind_fpm')} (vertical speed): at V2 with one engine the climb is only a few hundred feet per minute.`,
+          'The engine-failure profile in the calculator computes the segments for your aircraft, weight and airport.']), 'xp') +
+        k.tryit([['nadp', 'Departure profile (NADP & engine failure)']]);
+    },
+    quiz: [
+      { q: 'Which take-off segment usually limits the weight?', a: ['1st', '2nd', '3rd', 'Final'], c: 1, why: 'Gear up, take-off flaps, V2 and one engine: 2.4 % for a twin is hard to reach when it is hot and high.' },
+      { q: 'The minimum 2nd-segment gross gradient for a twin is…', a: ['0 %', '1.2 %', '2.4 %', '3.0 %'], c: 2, why: '2.4 % (three engines 2.7 %, four 3.0 %).' },
+      { q: 'Why do twins have more spare thrust than four-engine aircraft?', a: ['To cruise faster', 'Losing one of two engines halves the thrust; one of four only a quarter', 'Twins are heavier', 'The rules demand higher speeds'], c: 1, why: 'Equation (7.3): the factor n/(n−1) is 2 for a twin and 1.33 for a four-engine aircraft.' },
+      { q: 'Below what height are flaps not retracted after take-off?', a: ['35 ft', '400 ft', '1500 ft', '3000 ft'], c: 1, why: 'Certification assumes no configuration change except the gear below 400 ft.' }
+    ] });
+
+  T({ id: 'nadp', ch: 'proc', no: '7.2', title: 'Noise abatement departures: NADP 1 and NADP 2', blurb: 'Climb steeply first or clean up early: the energy equation behind thrust reduction and acceleration altitudes, and what goes in the FMS.',
+    thumb: () => Fg().depProfile([{ r: depThumb({ proc: 'nadp1' }), cls: 'sel', label: 'NADP 1', markers: false }, { r: depThumb({ proc: 'nadp2' }), cls: 'acc', label: 'NADP 2', markers: false }], { speed: false }),
+    render(ctx) {
+      const k = kit(ctx);
+      const n1 = depRef(ctx, { proc: 'nadp1' }), n2 = depRef(ctx, { proc: 'nadp2' });
+      const a1 = n1.at(3.5), a2 = n2.at(3.5);
+      const e3 = r => r.events.find(e => e.key === 'h3000');
+      const v1 = 160 * 0.514444, v2 = 250 * 0.514444, dh = (v2 * v2 - v1 * v1) / (2 * 9.80665) / 0.3048;
+      const elev = 131;
+      return k.lead('Close to the airport, noise comes from two things: how much thrust the engines make and how low the aircraft is. ICAO gives two ways to trade them. NADP 1 climbs steeply first to protect the houses close in; NADP 2 cleans up early to cut the noise further out — and saves fuel.') +
+        k.h('The energy equation') +
+        k.p('Spare thrust can be spent on climbing, on accelerating, or shared between the two. Divide every force along the flight path by the weight and you get:') +
+        k.eq(R`\frac{T - D}{W} = \sin\gamma + \frac{1}{g}\frac{dV}{dt}`, '7.5') +
+        k.p(`Hold the speed (${k.m(R`dV/dt = 0`)}) and all of it goes into climbing — equation (7.1). Lower the nose and part of it goes into speed. Speed is stored height: the <b>energy height</b> adds the height the aircraft could zoom up to if it traded all its speed:`) +
+        k.eq(R`h_E = h + \frac{V^2}{2g}`, '7.6') +
+        k.box('Worked example', k.p(`Accelerating from 160 kt to 250 kt needs ${k.m(R`\frac{(128.6)^2 - (82.3)^2}{2 \times 9.81} = ${Math.round(dh * 0.3048)}\ \text{m}`)} — about ${k.n(Math.round(dh / 10) * 10)} ft of climb. Every noise procedure is a decision about <i>where</i> to spend those ${k.n(Math.round(dh / 10) * 10)} ft.`), 'example') +
+        k.fig(Fg().depProfile([{ r: n1, cls: 'sel', label: 'NADP 1 — close-in' }, { r: n2, cls: 'acc', label: 'NADP 2 — distant' }], { refNm: 3.5, refLabel: '6.5 km from brake release' }),
+          `<b>Fig. 7.2</b> — NADP 1 and NADP 2 for a 737-800 at 70 t, sea level, ISA, flaps 5, computed with this app’s departure model. Over the noise-certification point 6.5 km from brake release, NADP 1 is ${k.n(a1.h - a2.h)} ft higher. NADP 2 is clean and at climb thrust much sooner, reaches 4000 ft at 250 kt ${k.n(n1.time - n2.time)} s earlier and burns about ${k.n(n1.fuel - n2.fuel)} kg less fuel on the way.`) +
+        k.h('The two procedures') +
+        `<div class="scroll-x"><table class="t"><thead><tr><th></th><th>NADP 1 — close-in</th><th>NADP 2 — distant</th></tr></thead><tbody>
+          <tr><td>Take-off to 800 ft</td><td>take-off thrust, V2 + 10 to 20 kt, take-off flaps</td><td>take-off thrust, V2 + 10 to 20 kt, take-off flaps</td></tr>
+          <tr><td>At 800 ft or above</td><td>reduce to climb thrust; keep V2 + 10–20 kt and the take-off flaps</td><td>lower the nose, accelerate towards the clean speed V<sub>ZF</sub> and retract flaps on schedule; reduce thrust at the first flap retraction (or when clean)</td></tr>
+          <tr><td>Up to 3000 ft</td><td>climb steeply at V2 + 10–20 kt</td><td>climb clean at V<sub>ZF</sub> + 10–20 kt</td></tr>
+          <tr><td>At 3000 ft</td><td>accelerate, retract flaps, go to en-route climb speed</td><td>accelerate to en-route climb speed</td></tr>
+          <tr><td>Quieter for</td><td>communities close to the runway</td><td>communities further out</td></tr></tbody></table></div>` +
+        k.ul(['A noise procedure never starts below 800 ft above the airport, and the initial climb is never slower than V2 + 10 kt.',
+          'Where no NADP is required, airlines use their own standard — often thrust reduction and acceleration at 1000–1500 ft (the Airbus default is 1500 ft for both).',
+          'The engine-out acceleration height is separate: it is set for obstacles, not noise (topic 7.1).',
+          'In NADP 2 the aircraft still climbs while accelerating — ICAO asks for a positive rate of climb. This app gives 60 % of the spare energy to speed and 40 % to climb, like a typical flight director.']) +
+        k.h('What goes in the FMS') +
+        k.p(`Airbus enters these on the PERF TAKE OFF page as <b>altitudes above sea level</b>; Boeing on TAKEOFF REF page 2 as <b>heights above the runway</b>. For an airport at ${elev} ft:`) +
+        `<div class="scroll-x"><table class="t"><thead><tr><th></th><th class="n">Airbus — THR RED / ACC</th><th class="n">Boeing — THR REDUCTION / ACCEL HT</th></tr></thead><tbody>
+          <tr><td>NADP 1</td><td class="n">${k.n(elev + 800)} / ${k.n(elev + 3000)}</td><td class="n">800 / 3000</td></tr>
+          <tr><td>NADP 2</td><td class="n">${k.n(elev + 800)} / ${k.n(elev + 800)}</td><td class="n">FLAPS 1 / 800</td></tr>
+          <tr><td>Standard 1500 / 1500</td><td class="n">${k.n(elev + 1500)} / ${k.n(elev + 1500)}</td><td class="n">1500 / 1500</td></tr></tbody></table></div>` +
+        k.p('Boeing can also reduce thrust at a flap setting (“FLAPS 1”), which is how NADP 2’s “reduce at the first flap retraction” is usually set. The Performance page’s take-off tab now shows these values for your aircraft and airport.') +
+        k.box('In X-Plane', k.ul([`At thrust reduction the N1 drops a few percent — watch ${k.code('sim/cockpit2/engine/indicators/N1_percent')}.`,
+          `At acceleration the pitch comes down several degrees (${k.code('sim/cockpit2/gauges/indicators/pitch_AHARS_deg_pilot')}) while the vertical speed (${k.code('sim/cockpit2/gauges/indicators/vvi_fpm_pilot')}) roughly halves.`,
+          'Study-level aircraft (Zibo 737, ToLiSS, FlightFactor, PMDG) take these entries in their FMS; with the default aircraft, fly the profile by hand.']), 'xp') +
+        k.tryit([['nadp', 'Departure profile calculator'], ['#perf.takeoff', 'Performance · take-off']]);
+    },
+    quiz: [
+      { q: 'NADP 1 mainly protects…', a: ['communities close to the airport', 'communities far away', 'the engines', 'the fuel reserve'], c: 0, why: 'It stays slow and steep with take-off flaps up to 3000 ft, so it is higher close in.' },
+      { q: 'The lowest height at which a noise-abatement thrust reduction may start is…', a: ['400 ft', '800 ft', '1500 ft', '3000 ft'], c: 1, why: 'ICAO: not below 800 ft (240 m) above the aerodrome.' },
+      { q: 'In NADP 2, what happens at 800 ft?', a: ['Nothing', 'Lower the nose, accelerate and retract flaps', 'More thrust and a steeper climb', 'Level off'], c: 1, why: 'It cleans up early and reduces thrust with the first flap retraction.' },
+      { q: 'Accelerating from 160 to 250 kt costs about as much energy as climbing…', a: ['160 ft', '1600 ft', '5000 ft', '16 000 ft'], c: 1, why: 'Energy height (7.6): (V₂² − V₁²) / 2g ≈ 500 m ≈ 1600 ft.' }
+    ] });
+
+  T({ id: 'stable-approach', ch: 'proc', no: '7.3', title: 'Stabilised approach and continuous descent', blurb: 'The 1000 ft and 500 ft gates, what “stable” means, and why a continuous idle descent is quieter.',
+    thumb: () => Fg().stableApproach(),
+    render(ctx) {
+      const k = kit(ctx);
+      const vs = gs => 101.27 * gs * Math.tan(3 * Math.PI / 180);
+      const ld = 17, gam = Math.atan(1 / ld) * 180 / Math.PI, dec = 9.80665 / ld / 0.514444;
+      return k.lead('Most landing accidents begin with an approach that was never under control. Airlines use simple gates: by 1000 ft above the runway — 500 ft in good weather — the aircraft must be stable, or it goes around.') +
+        k.fig(Fg().stableApproach(), '<b>Fig. 7.3</b> — The stabilisation gates on a 3° approach and the criteria behind them (after the Flight Safety Foundation’s approach-and-landing guidance, which most airlines follow).') +
+        k.p('The criteria are about energy: on the path, at the right speed, configured and with the engines already producing thrust. An aircraft that is fast, high or still configuring at 500 ft has too little time left to fix it — and the landing distance grows quickly with every extra knot.') +
+        k.h('Sink rate on the glide path') +
+        k.p('On a fixed path, the sink rate is set by the ground speed. For a 3° path in feet per minute with the ground speed in knots:') +
+        k.eq(R`VS = 101.3 \times GS \times \tan\gamma \;\approx\; 5.3 \times GS \quad (3^\circ)`, '7.7') +
+        k.box('Worked example', k.p(`At 140 kt ground speed a 3° path needs ${k.n(vs(140))} fpm. The same approach with a 20 kt tailwind (160 kt over the ground) needs ${k.n(vs(160))} fpm, and a fast, heavy aircraft at 180 kt ${k.n(vs(180))} fpm — close to the 1000 fpm limit. That is why tailwind approaches need extra care.`), 'example') +
+        k.h('Continuous descent') +
+        k.p('The quietest and cheapest descent keeps the engines near idle from the top of descent to the final approach, without level segments. Every level-off low down needs thrust, and thrust near the ground means noise and fuel.') +
+        k.fig(Fg().cdo(), '<b>Fig. 7.4</b> — A continuous descent (magenta) against a stepped descent (blue). ICAO calls this continuous descent operations (CDO).') +
+        k.p('How steep can an idle descent be? At idle and constant speed the energy equation (7.5) with ' + k.m(R`T \approx 0`) + ' leaves only drag:') +
+        k.eq(R`\gamma_{\text{idle}} \approx -\frac{D}{W} = -\frac{1}{L/D}`, '7.8') +
+        k.p(`A clean airliner with ${k.m(R`L/D \approx ${ld}`)} glides at ${k.m(R`\arctan(1/${ld}) = ${gam.toFixed(1)}^\circ`)} — just steeper than a 3° glide path. So a clean aircraft on the glide path needs a little thrust, and an aircraft that must also slow down has to add drag: speed brakes, flaps or gear.`) +
+        k.p('Slowing down in level flight at idle works the same way — all the drag goes into deceleration:') +
+        k.eq(R`\frac{dV}{dt} \approx -\,\frac{g}{L/D}`, '7.9') +
+        k.box('Worked example', k.p(`With L/D ${ld}: ${k.m(R`9.81 / ${ld} = ${(9.80665 / ld).toFixed(2)}\ \text{m/s}^2`)}, about ${dec.toFixed(1)} kt per second. Slowing from 250 kt to 210 kt in level flight takes some ${k.n(40 / dec)} s — about 2.5 NM. That is where the planning rule “add 1 NM per 10 kt to lose” (topic 4.5) comes from.`), 'example') +
+        k.box('In X-Plane', k.ul([`Fly an ILS and watch ${k.code('sim/cockpit2/gauges/indicators/vvi_fpm_pilot')}: it should settle near 5 × your ground speed.`,
+          `Call out the gates with ${k.code('sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_pilot')} — or use the altitude above the runway, as the airlines do.`,
+          'Plan descents with the Climb & descent calculator and try to reach the final approach fix without levelling off.']), 'xp') +
+        k.tryit([['descent', 'Top of descent'], ['ils', 'ILS glide path heights']]);
+    },
+    quiz: [
+      { q: 'In IMC, by what height must an approach be stable?', a: ['200 ft', '500 ft', '1000 ft', '1500 ft'], c: 2, why: '1000 ft above the airport in IMC, 500 ft in VMC.' },
+      { q: 'Unstable below the gate. What now?', a: ['Continue and fix it', 'Go around', 'Ask ATC', 'Extend full flaps'], c: 1, why: 'The rule is simple on purpose: go around.' },
+      { q: 'A clean airliner at idle (L/D 17) descends at about…', a: ['1°', '3.4°', '6°', '10°'], c: 1, why: 'Equation (7.8): arctan(1/17) = 3.4°.' },
+      { q: 'On a 3° glide path, a tailwind makes the sink rate…', a: ['smaller', 'larger', 'the same', 'zero'], c: 1, why: 'Sink rate = 5.3 × ground speed, and a tailwind raises the ground speed.' }
+    ] });
+
+  T({ id: 'go-around', ch: 'proc', no: '7.4', title: 'Go-around and missed approach', blurb: 'TOGA, pitch, flaps, gear: the go-around sequence, the height it costs, and the climb gradients behind it.',
+    thumb: () => Fg().goAround(),
+    render(ctx) {
+      const k = kit(ctx);
+      const loss = (vs, t) => 0.5 * vs / 60 * t;
+      return k.lead('A go-around is a normal manoeuvre, practised on every simulator check — and still one of the most demanding: lots of thrust, a big pitch change and a busy cockpit, usually close to the ground and often unexpected.') +
+        k.fig(Fg().goAround(), '<b>Fig. 7.5</b> — The go-around sequence. The missed-approach procedure is designed for a 2.5 % climb gradient (152 ft per NM) unless a higher gradient is published.') +
+        k.h('The sequence') +
+        k.ul(['<b>Go-around, flaps.</b> Thrust levers to TOGA (or press TO/GA), rotate to the go-around attitude (about 15°) and retract the flaps one step — FULL → 3 on an Airbus, 30 → 15 on a 737.',
+          '<b>Positive climb → gear up.</b> Only when the altimeter and vertical speed both show a climb.',
+          '<b>Follow the missed approach.</b> Engage the navigation mode, fly the published track and watch the level-off: the missed-approach altitude is often only 2000–3000 ft above the runway.',
+          '<b>At the acceleration altitude</b> retract the flaps on schedule and set climb thrust — the same clean-up as after take-off (topic 7.2).']) +
+        k.h('Height lost before the climb starts') +
+        k.p('The descent does not stop the moment you decide. The pitch change and the engines take a few seconds; if the sink rate falls roughly evenly to zero over that time, the aircraft loses:') +
+        k.eq(R`\Delta h \approx \tfrac12 \times \frac{VS}{60} \times t`, '7.10') +
+        k.box('Worked example', k.p(`Descending at 750 fpm with 5 s to stop the descent: ${k.m(R`\tfrac12 \times \tfrac{750}{60} \times 5 = ${Math.round(loss(750, 5))}\ \text{ft}`)}. From a decision height of 200 ft the wheels stay well clear — but at 1000 fpm and 8 s it is already ${Math.round(loss(1000, 8))} ft. On a Category II or III approach the decision heights are lower and the aircraft may touch the runway during the go-around; that is allowed for.`), 'example') +
+        k.h('The climb gradients behind it') +
+        k.p('Certification makes sure the aircraft can always climb away from an approach — which limits the landing weight at hot and high airports:') +
+        `<div class="scroll-x"><table class="t"><thead><tr><th>Case</th><th>Configuration</th><th class="n">Twin</th><th class="n">Three</th><th class="n">Four</th></tr></thead><tbody>
+          <tr><td>Approach climb</td><td>one engine out, approach flaps, gear up</td><td class="n">2.1 %</td><td class="n">2.4 %</td><td class="n">2.7 %</td></tr>
+          <tr><td>Landing climb</td><td>all engines, landing flaps, gear down, thrust 8 s after the levers move</td><td class="n">3.2 %</td><td class="n">3.2 %</td><td class="n">3.2 %</td></tr>
+          <tr><td>Missed-approach design</td><td>obstacle clearance on the published procedure</td><td class="n" colspan="3">2.5 % unless published</td></tr></tbody></table></div>` +
+        k.p('With all engines a go-around climb is easy: 2.5 % at 150 kt is only about 380 fpm (equation 4.9). The hard parts are human.') +
+        k.h('Why go-arounds catch crews out') +
+        k.ul(['<b>Pitch-up with the engines under the wing.</b> TOGA thrust pushes the nose up hard; with the stabiliser trimmed for the approach, it needs a firm push and retrimming.',
+          '<b>The body lies.</b> Strong acceleration feels like pitching up (the somatogravic illusion), especially at night — crews have pushed the nose down into the ground. Trust the attitude indicator.',
+          '<b>Quick level-off.</b> At high thrust and a low missed-approach altitude the aircraft arrives in seconds; speed and flap limits come quickly. Reduce thrust in time.',
+          '<b>Surprise.</b> Go-arounds are rare in daily flying. Brief one on every approach, so it is a plan and not a surprise.']) +
+        k.box('In X-Plane', k.ul(['Most airliners in X-Plane use a TO/GA button or detent: bind “TOGA power” to a joystick button so the go-around is one action.',
+          `Watch ${k.code('sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_pilot')} during a go-around from minimums to see the height you lose.`,
+          `Gear handle: ${k.code('sim/cockpit2/controls/gear_handle_down')} — note how long you wait for a positive climb before it goes up.`]), 'xp') +
+        k.tryit([['climb-gradient', 'Climb gradient ⇄ rate'], ['vpath', 'Vertical path to a fix']]);
+    },
+    quiz: [
+      { q: 'The first actions of a go-around are…', a: ['gear up, then flaps', 'TOGA, pitch up, flaps one step', 'flaps fully up', 'idle and wait'], c: 1, why: 'Thrust and attitude first; flaps one step to cut drag but keep lift.' },
+      { q: 'When does the gear come up in a go-around?', a: ['Immediately', 'With a positive rate of climb', 'At 1500 ft', 'After the flaps are up'], c: 1, why: 'Only once the aircraft is really climbing.' },
+      { q: 'The default missed-approach climb gradient is…', a: ['1.2 %', '2.5 %', '5 %', '10 %'], c: 1, why: '2.5 % (152 ft/NM) unless the chart publishes a higher one.' },
+      { q: 'Descending at 750 fpm and taking 5 s to stop the descent, you lose about…', a: ['3 ft', '30 ft', '300 ft', 'nothing'], c: 1, why: 'Equation (7.10): ½ × 12.5 ft/s × 5 s ≈ 31 ft.' }
+    ] });
+
   // ------------------------------------------------------------ quizzes for the core topics
   const QUIZ = {
     forces: [
@@ -783,5 +1053,5 @@
   const noKey = no => no.split('.').map(Number);
   topics.sort((a, b) => chOrder(a.ch) - chOrder(b.ch) || noKey(a.no)[1] - noKey(b.no)[1]);
 
-  root.XFC.study = { chapters, topics, kit };
+  root.XFC.study = { chapters, topics, kit, explainHTML, labelHTML };
 })(typeof self !== 'undefined' ? self : this);

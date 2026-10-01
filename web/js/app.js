@@ -7,7 +7,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = x => typeof x === 'number' && isFinite(x);
   const view = () => $('#view');
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.3.0';
 
   // ------------------------------------------------------------------ storage
   const store = {
@@ -80,42 +80,7 @@
   const live = { raw: null, s: null, ac: null, det: null, sig: null, src: 'none', bridge: false, cfg: null, hist: [], lastHist: 0, streamOk: false };
   const demo = X.demo;
 
-  function derive(f, ac, det) {
-    const s = Object.assign({}, f);
-    s.mtow = ac.mtow; s.oew = ac.oew;
-    const mv = isNum(f.magVar) ? f.magVar : 0;
-    s.trkM = isNum(f.trkT) ? C.norm360(f.trkT - mv) : NaN;
-    s.windDirM = isNum(f.windDirT) ? C.norm360(f.windDirT - mv) : NaN;
-    if (!isNum(s.pa) && isNum(f.altInd) && isNum(f.baro)) s.pa = C.pressureAltitude(f.altInd, f.baro);
-    if (isNum(s.pa) && isNum(f.oat)) {
-      s.isaT = C.isaTempC(s.pa); s.isaDev = f.oat - s.isaT;
-      const da = C.densityAltitude(s.pa, f.oat); s.da = da.ft; s.sigma = da.sigma;
-      const spd = isNum(f.cas) && f.cas > 30 ? f.cas : f.ias;
-      if (isNum(spd) && spd > 30) { const t = C.casToTas(spd, s.pa, f.oat); s.tasCalc = t.tas; s.machCalc = t.mach; s.eas = t.eas; }
-      if (isNum(f.mach)) s.tatCalc = C.tatFromSat(f.oat, f.mach);
-      if (isNum(f.altInd)) s.trueAlt = C.trueHeight(f.altInd, s.isaDev, 0);
-    }
-    if (isNum(f.hdgT) && isNum(f.trkT) && f.gs > 20) s.drift = C.norm180(f.trkT - f.hdgT);
-    if (isNum(f.windDirT) && isNum(f.windKt) && isNum(f.hdgT)) {
-      const w = C.windComponents(f.windDirT, f.windKt, f.hdgT); s.hw = w.head; s.xw = w.cross;
-    }
-    if (isNum(f.vs) && f.gs > 20) s.fpa = C.angleFromVs(f.vs, f.gs);
-    if (f.gs > 20) s.vs3 = C.vsForAngle(f.gs, 3);
-    if (f.ff > 0 && isNum(f.fuel)) { s.endurMin = f.fuel / f.ff * 60; if (f.gs > 20) s.rangeNm = f.fuel / f.ff * f.gs; }
-    s.nz = isNum(f.roll) ? 1 / Math.cos(C.rad(Math.min(80, Math.abs(f.roll)))) : 1;
-    const wr = ac.mtow > 0 && f.mass > 0 ? Math.sqrt(f.mass / ac.mtow) : 1;
-    const flapsOut = (f.flapDep ?? f.flapReq ?? 0) > 0.05;
-    const vRef = flapsOut ? (ac.vso > 0 ? ac.vso : ac.vs) : ac.vs;
-    if (vRef > 0) { s.vsEst = vRef * wr; s.vsTurn = s.vsEst * Math.sqrt(s.nz); if (f.ias > 0) s.stallMargin = f.ias / s.vsTurn - 1; }
-    if (ac.vne > 0 && isNum(f.ias)) s.toVne = ac.vne - f.ias;
-    if (ac.mmo > 0 && isNum(f.mach)) s.toMmo = ac.mmo - f.mach;
-    s.flapLabel = A.flapLabel(f.flapDep ?? f.flapReq, det && det.profile, ac.flapDetents);
-    if (f.onGround) s.phase = f.gs > 40 ? 'Take-off / landing roll' : f.gs > 3 ? 'Taxi' : 'On ground';
-    else if (f.vs > 400) s.phase = 'Climb'; else if (f.vs < -400) s.phase = 'Descent';
-    else s.phase = f.altInd > 18000 ? 'Cruise' : 'Level flight';
-    s.std = isNum(f.baro) && Math.abs(f.baro - 1013.25) < 0.3;
-    return s;
-  }
+  const derive = X.derive;   // web/js/derive.js — shared with the X-Plane plugin
 
   function onSnapshot(st, src) {
     live.raw = st; live.src = src;
@@ -216,7 +181,7 @@
   let current = null, currentRoute = { view: 'live' };
   const routes = { live: renderLive, calc: renderCalc, perf: renderPerf, study: renderStudy, settings: renderSettings };
   function route() {
-    const h = (location.hash || '#live').slice(1);
+    const h = (location.hash || '#live').slice(1).split('#')[0];   // a second # points inside the page (#study.stall#eqx-1-5)
     const [v, sub] = h.split('.');
     const name = routes[v] ? v : 'live';
     currentRoute = { view: name, sub };
@@ -558,6 +523,7 @@
       try { out = c.run(Object.assign({}, vals), { s: live.s, det: live.det }); } catch (e) { out = { error: 'Could not calculate: ' + e.message }; }
       if (out.error) { outEl.innerHTML = `<div class="note bad err">${esc(out.error)}</div>`; return; }
       outEl.innerHTML = `<div class="results">${out.results.filter(r => r.fmt === 'text' || isNum(r.value)).map(resultHTML).join('')}</div>
+        ${out.figure ? `<figure class="fig calc-fig"><div class="draw">${out.figure}</div>${out.figCaption ? `<figcaption>${esc(out.figCaption)}</figcaption>` : ''}</figure>` : ''}
         ${(out.notes || []).map(t => `<div class="note" style="margin-top:12px">${esc(t)}</div>`).join('')}
         ${out.steps && out.steps.length ? `<details class="working" ${workingOpen ? 'open' : ''}><summary>Show the working</summary>${stepsHTML(out.steps)}</details>` : ''}`;
       const d = $('details', outEl);
@@ -589,6 +555,8 @@
   // ================================================================== PERFORMANCE
   const plan = Object.assign({ profile: 'auto' }, store.get('plan', {}));
   const savePlan = () => store.set('plan', plan);
+  /** After-take-off (NADP / engine-out) settings on the take-off tab. Heights are above the airport. */
+  const DEP_DEF = { depProc: 'nadp2', depV2Add: 15, nadp1Thr: 800, nadp2Acc: 800, stdThr: 1500, stdAcc: 1500, eoAcc: 1000 };
   function currentProfile() {
     if (plan.profile && plan.profile !== 'auto' && A.byId[plan.profile]) return A.byId[plan.profile];
     if (live.det && live.det.profile) return live.det.profile;
@@ -614,7 +582,7 @@
       arrRwyHdg: 263, ldaM: 2800, arrSlope: 0, arrSurface: 'dry', ldgFlap: ldF, ab: ab.length ? ab[Math.min(1, ab.length - 1)].id : null, reverse: 'yes',
       climbCas: p.engine === 'turboprop' ? 210 : 290, climbMach: p.cruiseMach || 0.5, desFrom: defaultCruise(p), desTo: 3000, desGs: p.engine === 'turboprop' ? 260 : 360, decelNm: 10,
       forProfile: p.id
-    });
+    }, DEP_DEF);
     savePlan();
   }
 
@@ -807,6 +775,16 @@
 
   function perfTakeoff(p, body) {
     const flapOpts = p.takeoffFlaps.map(f => [f.id, (p.policy === 'airbus' ? 'CONF ' : 'Flaps ') + f.id]);
+    for (const [k, d] of Object.entries(DEP_DEF)) if (plan[k] == null) plan[k] = d;
+    const DEPF = [
+      { k: 'depProc', label: 'Departure procedure', type: 'select', options: [['nadp1', 'NADP 1 — close-in'], ['nadp2', 'NADP 2 — distant'], ['custom', 'Airline standard'], ['eo', 'Engine failure at V1']] },
+      { k: 'depV2Add', label: 'Initial climb speed V2 +', unit: 'kt', step: 1, show: () => plan.depProc !== 'eo' },
+      { k: 'nadp1Thr', label: 'Thrust reduction height', unit: 'ft AAL', step: 100, show: () => plan.depProc === 'nadp1' },
+      { k: 'nadp2Acc', label: 'Acceleration height', unit: 'ft AAL', step: 100, show: () => plan.depProc === 'nadp2' },
+      { k: 'stdThr', label: 'Thrust reduction height', unit: 'ft AAL', step: 100, show: () => plan.depProc === 'custom' },
+      { k: 'stdAcc', label: 'Acceleration height', unit: 'ft AAL', step: 100, show: () => plan.depProc === 'custom' },
+      { k: 'eoAcc', label: 'Engine-out acceleration height', unit: 'ft AAL', step: 100 }
+    ];
     const F = [
       { k: 'toFlap', label: 'Take-off flaps', type: 'select', options: flapOpts },
       { k: 'depSurface', label: 'Runway condition', type: 'select', options: [['dry', 'Dry'], ['wet', 'Wet'], ['contaminated', 'Contaminated']] },
@@ -821,7 +799,13 @@
         <fieldset class="fs"><legend>Conditions</legend><div class="fields">${massSourceFields('to')}${fieldsWithQ(F)}</div></fieldset>
         <div class="row">${simButtons('dep')}<span class="small muted">${live.s ? 'Fills OAT, QNH, wind' + (live.s.onGround ? ', elevation and runway heading' : '') + ' from the sim.' : ''}</span></div>
       </section>
-      <section class="panel pad" id="toOut"></section></div>`;
+      <section class="panel pad" id="toOut"></section></div>
+      <section class="panel pad dep-panel" id="depPanel">
+        <div class="card-h"><h3>After take-off · FMS</h3><span class="chip accent" id="depChip"></span></div>
+        <p class="small muted" style="margin:-4px 0 12px">Thrust reduction, acceleration and clean-up for the take-off above, flown with the energy equation. <a href="#study.nadp">How NADP 1 and 2 work</a> · <a href="#study.climb-out">Engine failure after V1</a></p>
+        <div class="fields">${fieldsWithQ(DEPF)}</div>
+        <div id="depOut"></div>
+      </section>`;
     const draw = () => {
       const { toMass } = perfCalc(p);
       const wc = C.windComponents(plan.depWindDir, plan.depWindKt, plan.rwyHdg);
@@ -854,8 +838,52 @@
           { t: 'Assumed temperature: pretend it is hotter until the runway is just long enough (max 25 % reduction)', tex: String.raw`T_{flex} = \max\{T : \text{TOFL}(T) \le \text{TORA},\ 1 - \tfrac{T(T)}{T(OAT)} \le 25\%\} = ${useFlex ? fx.flex + '^\\circ\\text{C}' : '\\text{none}'}` }
         ])}</details>
         <p class="small muted" style="margin-top:12px">Estimate for simulation. Real V-speeds also depend on VMCA, tyre and brake limits and obstacle clearance.</p>`;
+      drawDep({ mass: toMass, flap: sp.flap, elevFt: plan.depElev, qnh: plan.depQnh, oatC: plan.depOat, headwind: wc.head, thrustPct: useFlex ? (1 - fx.reduction) * 100 : 100, flexC: useFlex ? fx.flex : null });
     };
-    bindPlan(body, k => { if (k === 'toMassMode') { route(); return; } draw(); });
+    const drawDep = base => {
+      const out = $('#depOut'); if (!out) return;
+      const proc = plan.depProc, airbus = p.policy === 'airbus', Fg = X.figures;
+      const hts = { nadp1: { thrRedFt: plan.nadp1Thr }, nadp2: { accFt: plan.nadp2Acc }, custom: { thrRedFt: plan.stdThr, accFt: plan.stdAcc } };
+      const b = Object.assign({}, base, { v2Add: plan.depV2Add });
+      let eo, r;
+      try {
+        eo = P.departureProfile(p, Object.assign({ proc: 'eo', accFt: plan.eoAcc }, b));
+        r = proc === 'eo' ? eo : P.departureProfile(p, Object.assign({ proc }, b, hts[proc]));
+      } catch (e) { out.innerHTML = `<div class="note bad">Could not compute the departure: ${esc(e.message)}</div>`; return; }
+      const msl = h => num(Math.round((plan.depElev + h) / 10) * 10);
+      const cu = r.cleanup, sp2 = r.speeds;
+      const fms = proc === 'nadp1' ? [r.thrRedFt, 3000] : proc === 'nadp2' ? [r.accFt, r.accFt] : proc === 'custom' ? [r.thrRedFt, r.accFt] : null;
+      const firstTo = cu.steps.length ? cu.steps[0].to : 'UP';
+      const g = eo.gradients, eoOk = !eo.cannotClimb && g.second >= eo.minGrad.second;
+      const ev = k => r.events.find(e => e.key === k);
+      const ref = r.at(3.51), h3 = ev('h3000');
+      const cell = (k, v, x, cls = '') => `<div class="res ${cls}"><div class="k">${k}</div><div class="v${String(v).length > 14 ? ' txt' : ''}">${v}</div>${x ? `<div class="x">${x}</div>` : ''}</div>`;
+      $('#depChip').textContent = { nadp1: 'NADP 1', nadp2: 'NADP 2', custom: 'airline standard', eo: 'engine failure' }[proc];
+      const fmsCells = airbus
+        ? (fms ? cell('THR RED / ACC', msl(fms[0]) + ' / ' + msl(fms[1]), 'MCDU PERF TAKE OFF · ft above sea level (' + num(fms[0]) + ' / ' + num(fms[1]) + ' above the airport)', 'main') : '') +
+          cell('ENG OUT ACC', msl(eo.accFt), num(eo.accFt) + ' ft above the airport', fms ? '' : 'main')
+        : (fms ? cell('THR REDUCTION / ACCEL HT', (proc === 'nadp2' && p.maneuver ? 'FLAPS ' + firstTo : num(fms[0]) + ' FT') + ' / ' + num(fms[1]) + ' FT', 'FMC TAKEOFF REF page 2 · above the runway (altitudes ' + msl(fms[0]) + ' / ' + msl(fms[1]) + ' ft)', 'main') : '') +
+          cell('EO ACCEL HT', num(eo.accFt) + ' FT', 'altitude ' + msl(eo.accFt) + ' ft', fms ? '' : 'main');
+      const clean = cu.steps.map(s => esc(s.label) + ' at ' + num(s.at)).join(' · ');
+      const res = fmsCells +
+        cell(proc === 'eo' ? 'Fly V2' : 'Initial climb (V2 + ' + r.v2Add + ')', num(proc === 'eo' ? sp2.v2 : r.vInit) + unitHTML('kt'), proc === 'eo' ? 'or the speed at the failure, up to V2 + 15' : 'hold it until the acceleration height') +
+        cell('Clean-up speeds', clean + unitHTML('kt'), esc(cu.cleanName) + ' ' + num(cu.vClean) + ' kt') +
+        (proc === 'eo'
+          ? cell('2nd segment, one engine out', eo.cannotClimb ? 'cannot climb' : num(g.second * 100, 1) + unitHTML('%'), 'minimum ' + num(eo.minGrad.second * 100, 1) + ' % · final ' + (g.final ? num(g.final * 100, 1) + ' %' : '—'), eoOk ? 'ok' : 'bad')
+          : cell('Over 6.5 km from brake release', ref ? num(ref.h) + unitHTML('ft') : '—', ref ? num(ref.v) + ' kt · ' + (ref.thr === 'TO' ? 'take-off thrust' : 'climb thrust') : '') +
+            cell('3000 ft above the airport', h3 ? num(h3.x, 1) + unitHTML('NM') : '—', h3 ? 'from brake release · ' + num(h3.t) + ' s after lift-off' : '') +
+            cell('Engine out: 2nd segment', eo.cannotClimb ? 'cannot climb' : num(g.second * 100, 1) + unitHTML('%'), 'minimum ' + num(eo.minGrad.second * 100, 1) + ' %', eoOk ? 'ok' : 'bad'));
+      let fig = '';
+      if (Fg) {
+        if (proc === 'eo') fig = eo.cannotClimb ? '' : Fg.toSegments(eo, P.departureProfile(p, Object.assign({ proc: 'custom', thrRedFt: 1500, accFt: 1500 }, b)));
+        else fig = Fg.depProfile([{ r, cls: 'acc', label: { nadp1: 'NADP 1', nadp2: 'NADP 2', custom: 'Airline standard' }[proc] }], { refNm: 3.5, refLabel: '6.5 km from brake release' });
+      }
+      out.innerHTML = `<div class="results">${res}</div>
+        ${eo.cannotClimb ? '<div class="note bad" style="margin-top:12px"><b>One engine out, this aircraft cannot climb</b> at this weight, temperature and elevation — the climb (WAT) limit. Reduce the mass or use more thrust.</div>' : ''}
+        ${base.flexC != null ? `<div class="note" style="margin-top:12px">Take-off thrust in the profile is the FLEX / assumed-temperature thrust (${num(base.thrustPct)} % of TOGA at ${num(base.flexC)} °C).</div>` : ''}
+        ${fig ? `<figure class="fig calc-fig"><div class="draw">${fig}</div><figcaption>${proc === 'eo' ? 'Engine failure at V1: the four take-off segments. Dashed: all engines.' : 'Height and speed from brake release. THR RED = thrust reduction, ACC = acceleration; small dots are the flap steps.'}</figcaption></figure>` : ''}`;
+    };
+    bindPlan(body, k => { if (k === 'toMassMode' || k === 'depProc') { route(); return; } draw(); });
     const sb = $('[data-sim="dep"]', body);
     if (sb) sb.onclick = () => {
       const s = live.s; if (!s) return;
@@ -984,10 +1012,58 @@
 
   // ================================================================== STUDY
   function studyCtx(extra) { return Object.assign({ s: live.s, ac: live.ac, det: live.det, profile: currentProfile(), tex, num, hdg, esc, C, P, A }, extra || {}); }
-  function finishLesson(el) {
+  function finishLesson(el, topicId) {
     if (window.matchMedia('(max-width: 900px)').matches) { const b = $('#tocBtn'); if (b) { b.style.display = 'flex'; b.onclick = () => { $('#studySide').classList.toggle('open'); }; } }
     $$('.lesson [data-eq]', el).forEach(n => { n.innerHTML = tex(n.dataset.eq, n.dataset.inline !== '1'); });
+    explainBar(el, topicId);
+    bindExplainers(el);
+    const h = location.hash.split('#')[2];               // #study.topic#eqx-1-5 → open and show that explanation
+    if (h && /^eqx-/.test(h)) { const d = document.getElementById(h); if (d) { d.open = true; setTimeout(() => d.scrollIntoView({ block: 'center' }), 50); return; } }
     window.scrollTo(0, 0);
+  }
+
+  // ---------------------------------------------------------- equation explainers
+  const stepDecimals = step => { const s = String(step), i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
+  const withUnit = (v, u) => v + (u ? (u === '°' ? '' : ' ') + u : '');
+  /** Wire the "Try it" sliders under each equation: recompute the outputs on every move. */
+  function bindExplainers(el) {
+    const EX = X.explain || {}, lab = X.study.labelHTML;
+    $$('.eqx-play', el).forEach(box => {
+      const spec = EX[box.dataset.no] && EX[box.dataset.no].play;
+      if (!spec) return;
+      const ins = $$('input[type=range]', box), out = $('.eqx-out', box);
+      const upd = () => {
+        const v = {};
+        ins.forEach(i => {
+          const x = parseFloat(i.value); v[i.dataset.k] = x;
+          const o = i.parentNode.querySelector('output');
+          if (o) o.textContent = withUnit(num(x, stepDecimals(i.step)), i.dataset.unit);
+        });
+        let rows;
+        try { rows = spec.out(v, C) || []; } catch (e) { rows = [['Could not compute', e.message]]; }
+        out.innerHTML = rows.map(([k, val]) => `<div class="eqx-r"><span>${lab(k)}</span><b>${lab(val)}</b></div>`).join('');
+      };
+      ins.forEach(i => i.addEventListener('input', upd));
+      const rb = $('.eqx-reset', box);
+      if (rb) rb.onclick = () => { ins.forEach(i => { const d = spec.inputs.find(x => x.k === i.dataset.k); if (d) i.value = d.v; }); upd(); };
+      upd();
+    });
+  }
+  /** Bar under the lesson title: how many equations, and one button to open or close every explanation. */
+  function explainBar(el, topicId) {
+    const list = $$('.lesson .eqx', el), h1 = $('.lesson h1', el);
+    if (!list.length || !h1) return;
+    const bar = document.createElement('div');
+    bar.className = 'eqx-bar';
+    bar.innerHTML = `<span class="eqx-q" aria-hidden="true">?</span><div class="eqx-bar-t"><b>${list.length} equation${list.length > 1 ? 's' : ''} on this page.</b> Each one has an <b>Explain</b> button under it: plain words, what every symbol means, why it looks that way${$('.eqx-play', el) ? ' and sliders to try it' : ''}.${topicId !== 'reading-equations' ? ` New to equations? <a href="#study.reading-equations">Start with 0.1 Reading the equations</a>.` : ''}</div>
+      <button type="button" class="btn" id="eqxAll"></button>`;
+    h1.after(bar);
+    const btn = $('#eqxAll', bar);
+    const label = () => { btn.textContent = list.every(d => d.open) ? 'Close all explanations' : 'Open all explanations'; };
+    if (store.get('eqxAll', false)) list.forEach(d => { d.open = true; });
+    list.forEach(d => d.addEventListener('toggle', label));
+    btn.onclick = () => { const open = !list.every(d => d.open); list.forEach(d => { d.open = open; }); store.set('eqxAll', open); label(); };
+    label();
   }
   function liveType() { return live.ac && live.det ? X.acStudy.forAircraft(live.ac, live.det) : null; }
   function libraryHTML() {
@@ -1053,7 +1129,7 @@
       <article class="lesson"><div class="eyebrow">${esc(topic.no)} · ${esc(S.chapters.find(c => c.id === topic.ch).title)}</div><h1>${esc(topic.title)}</h1>${html}
         <nav class="lesson-nav">${prev ? `<a class="btn" href="#study.${prev.id}">← ${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="btn" href="#study.${next.id}">${esc(next.title)} →</a>` : ''}</nav>
       </article></div>`;
-    finishLesson(el);
+    finishLesson(el, topic.id);
     return null;
   }
 

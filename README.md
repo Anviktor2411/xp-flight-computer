@@ -4,10 +4,13 @@ A study-level flight computer for **X-Plane 12**. It reads the sim live, detects
 
 - **Live flight deck** — airspeeds (IAS, CAS, TAS, GS, Mach), altitudes (indicated, pressure, density, temperature-corrected), wind components, fuel endurance and range, stall margin at your current weight and bank. Every value is marked as either read from X-Plane or calculated by the app.
 - **A study page for the aircraft you fly** — load any aircraft and it gets its own page: key numbers, its airspeed indicator with the colour arcs, stall speed against weight, how to fly it and a quiz. Airliners add V-speeds against weight, flap tables and a payload–range diagram. 52 types are in the library (from the Cessna 172 to the A380); anything else gets a page built from X-Plane’s own aircraft data.
-- **34 calculators** — E6B-style tools: wind triangle, crosswind, airspeed converter, crossover altitude, ISA, pressure and density altitude, cold-temperature correction, METAR decoder, cloud base, top of descent, glide, turns, great circle, holding entries, DME slant range, ILS glide path, NDB bearings, true/magnetic/compass headings, optimum altitude and step climb, wake separation, manoeuvring speed, fuel, mass & balance and more. Each shows its working step by step, and “Follow sim” fills the inputs from X-Plane live.
-- **Airliner performance**, which opens automatically when an airliner is detected: load sheet, fuel plan, take-off (V1/VR/V2, assumed temperature/FLEX, field length), landing (Vref/VLS, Vapp additives, landing distance, autobrake suggestion), crossover, top of descent, manoeuvre speeds. Runway data comes from X-Plane’s own airport database.
-- **Study library** — 33 topics in 6 chapters (principles of flight, atmosphere, airspeed, navigation, airliner performance, weather & operations) with diagrams, numbered equations, worked examples computed live, the X-Plane datarefs behind each value, and a short quiz at the end of every page.
+- **35 calculators** — E6B-style tools: wind triangle, crosswind, airspeed converter, crossover altitude, ISA, pressure and density altitude, cold-temperature correction, METAR decoder, cloud base, top of descent, glide, turns, great circle, holding entries, DME slant range, ILS glide path, NDB bearings, true/magnetic/compass headings, optimum altitude and step climb, wake separation, manoeuvring speed, fuel, mass & balance, the **departure profile (NADP 1 / NADP 2 / engine failure)** and more. Each shows its working step by step, and “Follow sim” fills the inputs from X-Plane live.
+- **Airliner performance**, which opens automatically when an airliner is detected: load sheet, fuel plan, take-off (V1/VR/V2, assumed temperature/FLEX, field length), **after take-off (thrust reduction, acceleration and engine-out acceleration heights as you would enter them in the Airbus MCDU or Boeing FMC, flap clean-up speeds, climb profile)**, landing (Vref/VLS, Vapp additives, landing distance, autobrake suggestion), crossover, top of descent, manoeuvre speeds. Runway data comes from X-Plane’s own airport database.
+- **Study library** — 38 topics in 8 chapters (start here, principles of flight, atmosphere, airspeed, navigation, airliner performance, weather & operations, airliner procedures) with diagrams, numbered equations, worked examples computed live, the X-Plane datarefs behind each value, and a short quiz at the end of every page.
+- **Every equation explained** — each of the 81 numbered equations has an **Explain** button: the equation in plain words, what every symbol means (with units and typical values), why it looks the way it does, and sliders to try it. New to equations? Topic **0.1 Reading the equations** covers Greek letters, subscripts, powers and roots, sine and cosine, units and rearranging.
+- **Airliner procedures** — the take-off segments and flying an engine failure after V1, **NADP 1 and NADP 2** noise-abatement departures (with the energy equation behind them), stabilised approaches and continuous descent, and the go-around.
 - **Phone or tablet as a second screen** — switch it on in Settings and scan the QR code.
+- **X-Plane plugin** — the calculators and the airliner performance pages also run in a window inside X-Plane 11 and 12 (Windows and Linux), with no browser needed. See *X-Plane plugin* below.
 
 > For flight simulation and study only. Not for real-world navigation or aircraft operation. Airliner figures are typical public data and estimates.
 
@@ -26,6 +29,16 @@ No X-Plane running? Press **Run the demo flight** to try everything with simulat
 3. Start X-Plane 12 and load an aircraft. Native Linux X-Plane and Steam installs (including Flatpak Steam) are found automatically for runway data.
 
 macOS works the same way with `sh start.sh`.
+
+## X-Plane plugin (inside the sim)
+
+The `XPFlightComputer` folder in the plugin download puts the calculators and airliner performance in a window inside X-Plane 11 (11.20+) and X-Plane 12, on Windows and Linux.
+
+1. Copy the **`XPFlightComputer`** folder into **`X-Plane 12/Resources/plugins/`** (keep `64`, `js` and `fonts` together).
+2. Start X-Plane and open **Plugins → XP Flight Computer → Show / hide**, or bind a key to **`xpfc/window/toggle`** (also `xpfc/window/calculators` and `xpfc/window/performance`) in Settings → Keyboard.
+3. The window can be moved, resized, popped out onto a second monitor or moved into VR from the plugin menu. Settings are saved in `Output/preferences/XPFlightComputer.json`.
+
+The plugin runs the same JavaScript as the app (through an embedded QuickJS engine), so the numbers match the web app exactly. The study library, aircraft pages and phone view stay in the app; both can run at the same time. Full instructions are in the plugin's `README.txt`.
 
 ## How it connects to X-Plane
 
@@ -102,8 +115,10 @@ python xpfc.py [--port 8765] [--lan] [--xp-host IP] [--discover] [--xp-root PATH
 
 - `tools/fake_xplane.py` is a stand-in for X-Plane that speaks both the Web API and UDP RREF, with a scripted flight. `python tools/fake_xplane.py --aircraft B738 --cycle 30` switches aircraft every 30 s.
 - `node tests/test_calc.js` and `node tests/test_perf.js` check the maths against published ISA tables and reference values, and the METAR decoder against sample reports.
-- The web app is plain HTML/CSS/JS (no build step): `web/js/calc.js` holds the aviation formulas, `web/js/study.js` the study topics, `web/js/types.js` the aircraft library and `web/js/acstudy.js` the aircraft pages.
+- The web app is plain HTML/CSS/JS (no build step): `web/js/calc.js` holds the aviation formulas, `web/js/perf.js` the airliner performance and departure (NADP) model, `web/js/study.js` the study topics, `web/js/explain.js` the plain-language explanation of every numbered equation, `web/js/types.js` the aircraft library and `web/js/acstudy.js` the aircraft pages.
+
+- The X-Plane plugin is in `plugin/`: `src/` (C++: Dear ImGui window, QuickJS host, datarefs), `js/xphost.js` (turns the app's calculator and performance code into what the window shows), and `build.sh`, which builds `lin.xpl` with Zig (glibc 2.27 baseline) and `win.xpl` with MinGW-w64. `sh build.sh test` builds an AddressSanitizer version plus `test/harness.cpp`, a stand-in X-Plane that loads the plugin, drives it with scripted clicks and keys under Xvfb and takes screenshots; `sh build.sh wintest` builds the same stand-in as `XPLM_64.dll` for running the real `win.xpl` under Wine.
 
 ## Credits
 
-Equations rendered with [KaTeX](https://katex.org) (MIT). QR codes by [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT). Typefaces: **B612** and **B612 Mono** (SIL Open Font License), designed for Airbus cockpit displays, and **Source Serif 4** (SIL Open Font License). License texts are in `web/vendor`.
+Equations rendered with [KaTeX](https://katex.org) (MIT). QR codes by [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT). Typefaces: **B612** and **B612 Mono** (SIL Open Font License), designed for Airbus cockpit displays, and **Source Serif 4** (SIL Open Font License). License texts are in `web/vendor`. The plugin uses [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [QuickJS-ng](https://github.com/quickjs-ng/quickjs) (MIT), [nlohmann/json](https://github.com/nlohmann/json) (MIT), the X-Plane SDK, and the DejaVu Sans font (Bitstream Vera licence).

@@ -448,7 +448,8 @@
     desc: 'Rate, radius and load factor of a level turn, and the bank for a standard-rate turn.',
     inputs: [
       { k: 'tas', label: 'True airspeed', unit: 'kt', v: 120, live: s => s.tas },
-      { k: 'bank', label: 'Bank angle', unit: '°', v: 30, live: s => has(s.roll) ? Math.abs(s.roll) : undefined },
+      { k: 'bank', label: 'Bank angle', unit: '°', v: 30, live: s => has(s.roll) && Math.abs(s.roll) >= 2 ? Math.abs(s.roll) : undefined,
+        hint: 'Follows X-Plane while you bank more than 2°' },
       { k: 'vs1', label: '1-g stall speed (optional)', unit: 'kt', v: 53, live: s => s.vsEst }
     ],
     run(v) {
@@ -1011,6 +1012,138 @@
         ],
         steps: [],
         notes: ['ICAO Doc 4444. Categories: Light ≤ 7 000 kg, Medium < 136 000 kg, Heavy ≥ 136 000 kg, Super = A380. Europe’s RECAT-EU uses six categories with shorter distances.']
+      };
+    }
+  });
+
+  // ---------------------------------------------------------- departure profile (NADP / engine failure)
+  const depAircraft = (v, ctx) => {
+    const A = root.XFC.aircraft;
+    const det = (ctx && ctx.det) || (root.XFC.app && root.XFC.app.live && root.XFC.app.live.det);
+    return (v.ac !== 'auto' && A && A.byId[v.ac]) || (det && det.profile) || (A && A.byId.B738);
+  };
+  const DEP_NAME = { nadp1: 'NADP 1', nadp2: 'NADP 2', custom: 'Airline standard', eo: 'Engine failure', aeo: 'All engines' };
+  /** Plain chart data for surfaces that cannot show the SVG figure (the X-Plane plugin draws it itself). */
+  const thin = (pts, max = 160) => { if (pts.length <= max) return pts; const out = [], step = (pts.length - 1) / (max - 1); for (let i = 0; i < max; i++) out.push(pts[Math.round(i * step)]); return out; };
+  const chartOf = (runs, o = {}) => ({
+    refNm: o.refNm || null, refLabel: o.refLabel || '', segments: o.segments || null,
+    runs: runs.map(q => ({ label: q.label, tone: q.cls, dash: !!q.dash, groundNm: q.r.groundNm,
+      pts: thin(q.r.pts).map(p => [Math.round(p.x * 1000) / 1000, Math.round(p.h), Math.round(p.v)]),
+      events: q.r.events.filter(e => ['thrRed', 'acc', 'clean', 'mct', 'flap'].includes(e.key)).map(e => ({ key: e.key, x: Math.round(e.x * 1000) / 1000, h: Math.round(e.h), label: e.label })) }))
+  });
+  /** Segment boundaries of an engine-failure run: [from NM, to NM, name]. */
+  const eoSegments = r => {
+    const ev = k => r.events.find(e => e.key === k), end = r.pts[r.pts.length - 1];
+    const gear = (r.pts.find(p => p.t >= 11) || r.pts[0]).x, acc = ev('acc'), mct = ev('mct');
+    return [[r.groundNm, gear, '1st'], [gear, acc ? acc.x : end.x, '2nd'], [acc ? acc.x : end.x, mct ? mct.x : end.x, '3rd'], [mct ? mct.x : end.x, end.x, 'final']];
+  };
+  add({
+    id: 'nadp', group: 'Operations', title: 'Departure profile: NADP & engine failure', study: 'nadp',
+    desc: 'Thrust reduction and acceleration for NADP 1, NADP 2 or your airline standard — or an engine failure at V1 — flown second by second with the energy equation for your aircraft, weight and airport. Gives the FMS entries and draws the climb.',
+    inputs: [
+      { k: 'ac', label: 'Aircraft', type: 'select', v: 'auto', options: () => [['auto', 'Detected aircraft (or 737-800)']].concat((root.XFC.aircraft ? root.XFC.aircraft.PROFILES : []).map(p => [p.id, p.name])) },
+      { k: 'proc', label: 'Procedure', type: 'select', v: 'nadp2', options: [['nadp1', 'NADP 1 — close-in'], ['nadp2', 'NADP 2 — distant'], ['custom', 'Airline standard (your heights)'], ['eo', 'Engine failure at V1']] },
+      { k: 'flap', label: 'Take-off flaps', type: 'select', v: 'def', options: v => { const p = depAircraft(v), pre = p.policy === 'airbus' ? 'CONF ' : 'Flaps ', d = p.takeoffFlaps.find(f => f.def) || p.takeoffFlaps[0]; return [['def', 'Type default (' + pre + d.id + ')']].concat(p.takeoffFlaps.map(f => [f.id, pre + f.id])); } },
+      { k: 'mass', label: 'Take-off mass', q: 'mass', v: 70000, live: s => s.mass },
+      { k: 'elev', label: 'Airport elevation', unit: 'ft', v: 131, live: s => (s.onGround ? s.altMsl : undefined) },
+      { k: 'oat', label: 'Outside air temperature', unit: '°C', v: 15, live: s => s.oat },
+      { k: 'qnh', label: 'QNH', q: 'press', v: 1013, live: s => s.qnh },
+      { k: 'wind', label: 'Headwind (− tailwind)', unit: 'kt', v: 0 },
+      { k: 'thr', label: 'Take-off thrust', unit: '% TOGA', v: 100, step: 1, hint: 'below 100 for a FLEX / assumed-temperature take-off' },
+      { k: 'v2add', label: 'Initial climb speed V2 +', unit: 'kt', v: 15, step: 1, show: v => v.proc !== 'eo', hint: 'ICAO: 10 to 20 kt' },
+      { k: 'thr1', label: 'Thrust reduction height', unit: 'ft AAL', v: 800, step: 100, show: v => v.proc === 'nadp1', hint: 'at least 800 ft; acceleration at 3000 ft' },
+      { k: 'acc2', label: 'Acceleration height', unit: 'ft AAL', v: 800, step: 100, show: v => v.proc === 'nadp2', hint: 'at least 800 ft; thrust reduced with the first flap retraction' },
+      { k: 'thrC', label: 'Thrust reduction height', unit: 'ft AAL', v: 1500, step: 100, show: v => v.proc === 'custom' },
+      { k: 'accC', label: 'Acceleration height', unit: 'ft AAL', v: 1500, step: 100, show: v => v.proc === 'custom' },
+      { k: 'accE', label: 'Engine-out acceleration height', unit: 'ft AAL', v: 1000, step: 100, show: v => v.proc === 'eo', hint: 'set for each runway (obstacles); at least 400 ft' },
+      { k: 'cmp', label: 'Compare with', type: 'select', v: 'yes', options: v => [['yes', v.proc === 'nadp1' ? 'NADP 2' : v.proc === 'eo' ? 'all engines' : 'NADP 1'], ['no', 'nothing']] }
+    ],
+    run(v, ctx) {
+      const P = root.XFC.perf, F = root.XFC.figures;
+      if (!P) return { error: 'The performance model is not loaded.' };
+      const p = depAircraft(v, ctx);
+      const flap = p.takeoffFlaps.some(f => f.id === v.flap) ? v.flap : (p.takeoffFlaps.find(f => f.def) || p.takeoffFlaps[0]).id;
+      const base = { mass: v.mass, flap, elevFt: v.elev, qnh: v.qnh, oatC: v.oat, thrustPct: v.thr, headwind: v.wind, v2Add: v.v2add };
+      const set = { nadp1: { thrRedFt: v.thr1 }, nadp2: { accFt: v.acc2 }, custom: { thrRedFt: v.thrC, accFt: v.accC }, eo: { accFt: v.accE }, aeo: { thrRedFt: 1500, accFt: 1500 } };
+      const fly = proc => P.departureProfile(p, Object.assign({ proc: proc === 'aeo' ? 'custom' : proc }, base, set[proc]));
+      const r = fly(v.proc);
+      const airbus = p.policy === 'airbus', cf = airbus ? 'CONF ' : 'flaps ';
+      const msl = h => qn(Math.round((v.elev + h) / 10) * 10);
+      const ev = (res, key) => res.events.find(e => e.key === key);
+      const sp = r.speeds, cu = r.cleanup, pc = g => n(g * 100, 1);
+      const clean = cu.steps.map(s => s.label + ' at ' + n(s.at)).join(' · ') + ' · ' + cu.cleanName + ' ' + n(cu.vClean) + ' kt';
+      const notes = ['A study model: thrust lapses with Mach, altitude and temperature; drag comes from a simple polar for each flap stage; while accelerating 60 % of the spare energy goes into speed. Your aircraft’s FMS and your airline’s procedures are the reference.'];
+      const kN = x => n(x / 1000, 1);
+      if (v.proc === 'eo') {
+        if (r.cannotClimb) {
+          return { results: [{ label: 'One engine out', value: 'Cannot climb', fmt: 'text', main: true, tone: 'bad', note: 'gradient ' + pc(r.gradients.first) + ' % with the gear down' },
+            { label: 'Aircraft', value: p.name + ', ' + qn(v.mass) + ' kg', fmt: 'text' }],
+            steps: [], notes: ['Too heavy for this temperature and elevation: reduce the take-off mass, use more flap or full thrust, or wait for cooler air. This is the climb (WAT) limit.'].concat(notes) };
+        }
+        const g = r.gradients, acc = ev(r, 'acc'), mct = ev(r, 'mct'), aeo = v.cmp === 'yes' ? fly('aeo') : null;
+        const s2 = g.secondAt || {}, sf = g.finalAt || {}, tTo = mct ? mct.t : r.time;
+        const res = [
+          { label: '2nd-segment gradient (gross)', value: g.second * 100, unit: '%', d: 1, main: true, tone: g.second >= r.minGrad.second ? 'ok' : 'bad', note: 'minimum ' + pc(r.minGrad.second) + ' % · net ' + pc(g.second - r.netCut) + ' %' },
+          { label: airbus ? 'ENG OUT ACC (MCDU, ft above sea level)' : 'EO ACCEL HT (FMC, ft above the runway)', value: airbus ? msl(r.accFt) : qn(r.accFt) + ' FT', fmt: 'text', main: true, note: airbus ? r.accFt + ' ft above the airport' : 'altitude ' + msl(r.accFt) + ' ft' },
+          { label: 'V2 — fly it (or up to V2 + 15)', value: sp.v2, unit: 'kt' },
+          { label: '1st-segment gradient (gear down)', value: g.first * 100, unit: '%', d: 1, tone: g.first > r.minGrad.first ? 'ok' : 'bad', note: 'must be above ' + pc(r.minGrad.first) + ' %' },
+          { label: 'Final-segment gradient (clean, MCT)', value: g.final * 100, unit: '%', d: 1, tone: g.final >= r.minGrad.final ? 'ok' : 'bad', note: 'minimum ' + pc(r.minGrad.final) + ' %' },
+          { label: 'Clean-up', value: clean, fmt: 'text' },
+          { label: 'Take-off thrust used for', value: tTo / 60, fmt: 'min', tone: tTo <= 600 ? 'ok' : 'bad', note: 'limit 10 min with an engine out' },
+          { label: '1500 ft above the airport after', value: r.pts[r.pts.length - 1].x, unit: 'NM', d: 1, note: 'from brake release' }
+        ];
+        return {
+          results: res,
+          figure: F ? F.toSegments(r, aeo) : null,
+          chart: chartOf([{ r, cls: 'line', label: 'Engine failure' }].concat(aeo ? [{ r: aeo, cls: 'sel', label: 'All engines', dash: true }] : []), { segments: eoSegments(r) }),
+          figCaption: 'The take-off flight path with one engine out: 1st segment (gear retracting), 2nd (V2, take-off flaps), 3rd (level acceleration, flaps up), final (clean, maximum continuous thrust).' + (aeo ? ' Dashed: all engines.' : ''),
+          steps: [
+            { t: '2nd segment: gear up, take-off flaps, V2, ' + (r.engines - 1) + ' of ' + r.engines + ' engines (7.2)', tex: R`\gamma = \frac{T - D}{W} = \frac{${kN(s2.T)} - ${kN(s2.D)}}{${kN(s2.W)}}\ \text{kN} = ${pc(g.second)}\,\% \;${g.second >= r.minGrad.second ? R`\ge` : '<'}\; ${pc(r.minGrad.second)}\,\%` },
+            { t: 'Net gradient for obstacle clearance (7.4)', tex: R`\gamma_{net} = ${pc(g.second)} - ${pc(r.netCut)} = ${pc(g.second - r.netCut)}\,\%` },
+            { t: 'Level acceleration at the EO acceleration height: all the spare energy goes into speed (7.5)', tex: R`\frac{1}{g}\frac{dV}{dt} = \frac{T - D}{W} \;\Rightarrow\; V_2 = ${n(sp.v2)} \to ${n(cu.vClean)}\ \text{kt in } ${n(mct && acc ? mct.t - acc.t : 0)}\ \text{s}` },
+            { t: 'Final segment: clean, maximum continuous thrust', tex: R`\gamma = \frac{${kN(sf.T)} - ${kN(sf.D)}}{${kN(sf.W)}} = ${pc(g.final)}\,\% \;${g.final >= r.minGrad.final ? R`\ge` : '<'}\; ${pc(r.minGrad.final)}\,\%` }
+          ],
+          notes: ['Fly V2 (or the speed at the failure, up to V2 + 15), no flap change below 400 ft, level off at the engine-out acceleration height, clean up, then set maximum continuous thrust and climb at ' + cu.cleanName + '.'].concat(notes)
+        };
+      }
+      // all engines: NADP 1, NADP 2 or the airline standard
+      const other = v.cmp === 'yes' ? fly(v.proc === 'nadp1' ? 'nadp2' : 'nadp1') : null;
+      const thrRed = ev(r, 'thrRed'), acc = ev(r, 'acc'), h3 = ev(r, 'h3000'), ref = r.at(3.51);
+      const firstTo = cu.steps.length ? cu.steps[0].to : 'UP';
+      const fms = v.proc === 'nadp1' ? [r.thrRedFt, 3000] : v.proc === 'nadp2' ? [r.accFt, r.accFt] : [r.thrRedFt, r.accFt];
+      const res = [
+        { label: airbus ? 'THR RED / ACC (MCDU, ft above sea level)' : 'THR REDUCTION / ACCEL HT (FMC, above the runway)', fmt: 'text', main: true,
+          value: airbus ? msl(fms[0]) + ' / ' + msl(fms[1]) : (v.proc === 'nadp2' && p.maneuver ? 'FLAPS ' + firstTo : qn(fms[0]) + ' FT') + ' / ' + qn(fms[1]) + ' FT',
+          note: airbus ? 'heights ' + qn(fms[0]) + ' / ' + qn(fms[1]) + ' ft above the airport' : 'altitudes ' + msl(fms[0]) + ' / ' + msl(fms[1]) + ' ft' },
+        { label: 'V2 → initial climb', value: n(sp.v2) + ' → ' + n(r.vInit) + ' kt', fmt: 'text', main: true, note: 'V2 + ' + r.v2Add + ' kt with ' + cf + sp.flap },
+        { label: 'Clean-up', value: clean, fmt: 'text', note: v.proc === 'nadp2' ? 'then ' + n(cu.vClean + 10) + ' kt to 3000 ft' : '' },
+        { label: 'Over 6.5 km from brake release', value: ref ? ref.h : NaN, unit: 'ft', note: ref ? n(ref.v) + ' kt, ' + (ref.thr === 'TO' ? 'take-off thrust' : 'climb thrust') + ', ' + (ref.stage === 0 ? cf + sp.flap : ref.stage >= cu.steps.length ? 'clean' : 'flaps retracting') : '' },
+        { label: '3000 ft above the airport after', value: h3 ? h3.x : NaN, unit: 'NM', d: 1, note: h3 ? n(h3.t) + ' s after lift-off' : '' },
+        { label: 'Fuel to ' + qn(r.toFt) + ' ft and ' + n(Math.max(r.climbKt, cu.vClean + 10)) + ' kt', value: r.fuel, q: 'mass' }
+      ];
+      if (other) {
+        const o = other.at(3.51), dh = ref && o ? ref.h - o.h : NaN, df = r.fuel - other.fuel;
+        res.push({ label: 'Compared with ' + DEP_NAME[other.proc], value: (dh >= 0 ? '+' : '') + qn(dh) + ' ft at 6.5 km · ' + (df >= 0 ? '+' : '') + qn(df) + ' kg fuel', fmt: 'text' });
+      }
+      if ((v.proc === 'nadp1' && v.thr1 < 800) || (v.proc === 'nadp2' && v.acc2 < 800)) notes.unshift('ICAO: a noise-abatement procedure never starts below 800 ft above the airport.');
+      if (v.proc === 'nadp1' && v.thr1 > 3000) notes.unshift('NADP 1 reduces thrust before 3000 ft, where it accelerates.');
+      const a0 = r.gradients.aeoAt || {};
+      const eh = kt => Math.pow(kt * C.K.KT, 2) / (2 * C.K.g0) / C.K.FT;
+      const vTop = Math.max(r.climbKt, cu.vClean + 10);
+      const runs = [{ r, cls: 'acc', label: DEP_NAME[v.proc] }].concat(other ? [{ r: other, cls: 'sel', label: DEP_NAME[other.proc], dash: true }] : []);
+      return {
+        results: res,
+        figure: F ? F.depProfile(runs, { refNm: 3.5, refLabel: '6.5 km from brake release' }) : null,
+        chart: chartOf(runs, { refNm: 3.5, refLabel: '6.5 km from brake release' }),
+        figCaption: 'Height and speed against distance from brake release. Markers: thrust reduction (THR RED), acceleration (ACC), each flap step and clean.' + (other ? ' Dashed: ' + DEP_NAME[other.proc] + ' for comparison.' : ''),
+        steps: [
+          { t: 'Speeds from the lift equation (topic 5.2): V2 ≥ 1.13 × the 1-g stall speed with ' + cf + sp.flap, tex: R`V_2 = ${n(sp.v2)}\ \text{kt} \qquad V_2 + ${r.v2Add} = ${n(r.vInit)}\ \text{kt}` },
+          { t: 'Climb gradient with take-off thrust: spare thrust ÷ weight (7.1)', tex: R`\gamma = \frac{T - D}{W} = \frac{${kN(a0.T)} - ${kN(a0.D)}}{${kN(a0.W)}}\ \text{kN} = ${pc(r.gradients.aeo)}\,\% \;\Rightarrow\; VS \approx 101.3 \times ${n(a0.tas)} \times ${n(r.gradients.aeo, 3)} = ${qn(101.27 * a0.tas * r.gradients.aeo)}\ \text{fpm}` },
+          { t: 'Thrust reduction: ' + (thrRed ? 'at ' + qn(thrRed.h) + ' ft — climb thrust is about 85 % of take-off thrust' : 'none'), tex: R`T_{CLB} \approx 0.85\,T_{TO}` },
+          { t: 'Acceleration at ' + (acc ? qn(acc.h) + ' ft' : '—') + ': the spare energy is shared, 60 % into speed and 40 % into climb (7.5)', tex: R`\sin\gamma = 0.4\,\frac{T - D}{W}, \qquad \frac{1}{g}\frac{dV}{dt} = 0.6\,\frac{T - D}{W}` },
+          { t: 'The whole acceleration costs this much energy height (7.6)', tex: R`\Delta h_E = \frac{V_{end}^2 - V_{start}^2}{2g} = ${qn(eh(vTop) - eh(r.vInit))}\ \text{ft} \quad (${n(r.vInit)} \to ${n(vTop)}\ \text{kt})` }
+        ],
+        notes
       };
     }
   });

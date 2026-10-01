@@ -35,7 +35,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP = "XP Flight Computer"
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 
 try:  # Windows consoles may not be UTF-8; never crash on a print
     sys.stdout.reconfigure(errors="replace")

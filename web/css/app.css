@@ -378,6 +378,49 @@ table.t tr.pick td { background: var(--live-soft); }
 .lesson-nav a { text-decoration: none; }
 .lesson-nav .btn, .tryit .btn { white-space: normal; max-width: 100%; }
 .lesson .tryit { font-family: var(--font-ui); display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 16px; }
+.lesson .scroll-x { margin: 6px 0 18px; }
+.lesson table.t { font-family: var(--font-ui); line-height: 1.45; }
+.lesson table.t td.n:not([colspan]), .lesson table.t th.n { white-space: nowrap; }
+
+/* equation explainers ("Explain" under every numbered equation) */
+.eqx { margin: -8px 0 18px; font-family: var(--font-ui); font-size: 14px; line-height: 1.55; }
+.eqx > summary { list-style: none; cursor: pointer; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%;
+  padding: 4px 12px 4px 5px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--sel); font-weight: 700; font-size: 13px; }
+.eqx > summary::-webkit-details-marker { display: none; }
+.eqx > summary:hover { border-color: var(--sel); background: var(--sel-soft); }
+.eqx > summary:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
+.eqx[open] > summary { border-color: var(--sel); background: var(--sel-soft); }
+.eqx-q { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--sel); color: var(--surface); font: 700 12px var(--font-ui); }
+.eqx .eqx-sub { color: var(--muted); font-weight: 400; font-size: 12px; }
+@media (max-width: 520px) { .eqx .eqx-sub { display: none; } }
+.eqx-body { margin-top: 10px; padding: 12px 16px 14px; border-left: 3px solid var(--sel); border-radius: 0 12px 12px 0; background: var(--surface-2); }
+.eqx-body h4 { margin: 16px 0 6px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.eqx-words { font-size: 15.5px; margin: 0; color: var(--text); }
+.eqx-parts { width: 100%; border-collapse: collapse; }
+.eqx-parts td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.eqx-parts tr:last-child td { border-bottom: 0; }
+.eqx-parts td.sym { width: 1%; white-space: nowrap; text-align: center; font-size: 15px; padding-left: 0; }
+.eqx-parts .what { display: block; }
+.eqx-parts .unit { display: block; color: var(--muted); font-size: 12.5px; }
+.eqx-why { margin: 0; padding-left: 20px; }
+.eqx-why li { margin-bottom: 7px; }
+.eqx .katex { font-size: 1.08em; }
+.eqx-play { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 640px) { .eqx-play { grid-template-columns: minmax(0, 1fr); } }
+.eqx-in { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: baseline; margin-bottom: 6px; }
+.eqx-in label { font-size: 12.5px; color: var(--muted); min-width: 0; }
+.eqx-in output { font-family: var(--font-num); color: var(--sel); font-weight: 700; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.eqx-in input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 4px 0 2px; accent-color: var(--sel); cursor: pointer; }
+.eqx-reset { border: 0; background: none; color: var(--muted); font: 12px var(--font-ui); text-decoration: underline; cursor: pointer; padding: 2px 0; }
+.eqx-reset:hover { color: var(--text); }
+.eqx-out { display: grid; gap: 6px; }
+.eqx-r { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 8px 11px; border-radius: 9px; background: var(--accent-soft); }
+.eqx-r span { font-size: 12.5px; color: var(--muted); min-width: 0; }
+.eqx-r b { font-family: var(--font-num); color: var(--accent); font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.eqx-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: 0 0 18px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font: 13px/1.5 var(--font-ui); color: var(--muted); }
+.eqx-bar .eqx-bar-t { flex: 1 1 280px; min-width: 0; }
+.eqx-bar b { color: var(--text); }
+.eqx-bar .btn { flex: none; }
 .katex { font-size: 1.08em; }
 .study-index { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
 .study-index a.tile { display: grid; gap: 8px; padding: 14px; text-decoration: none; color: var(--text); }
@@ -513,3 +556,9 @@ svg .t-sel { fill: var(--sel); font: 700 12.5px var(--font-ui); }
 svg .t-live { fill: var(--live); font: 700 12.5px var(--font-ui); }
 svg .t-warn { fill: var(--warn); font: 700 12.5px var(--font-ui); }
 svg .t-bad { fill: var(--bad); font: 700 12.5px var(--font-ui); }
+
+/* after-take-off (NADP / engine-out) panel and calculator figures */
+.dep-panel { margin-top: 16px; }
+.dep-panel .card-h a { font-weight: 700; }
+.calc-fig { margin: 18px 0 4px; }
+.dep-panel .calc-fig { max-width: 820px; }

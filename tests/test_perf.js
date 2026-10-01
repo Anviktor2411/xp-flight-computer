@@ -81,5 +81,28 @@ const ls = P.loadsheet(b738, { oew: 41413, crewKg: 500, pax: 160, paxKg: 84, bag
 within('B738 ZFW', ls.zfw, 59252, 59254);
 eq('B738 limited by', ls.limitedBy, 'MZFW + take-off fuel');
 
+// Departure profiles (NADP / engine failure)
+const cu = P.cleanupSpeeds(b738, 65000, '5');
+const vref40 = P.landingSpeeds(b738, 65000, '40').vref;
+within('B738 flaps 5 → 1 at the flaps 5 manoeuvre speed (Vref40 + 30)', cu.steps[0].at - vref40, 29.9, 30.1);
+eq('B738 flaps 5 clean-up has two steps', cu.steps.map(s => s.to).join(','), '1,UP');
+within('B738 flaps-up speed = Vref40 + 70', cu.vClean - vref40, 69.9, 70.1);
+eq('A320 CONF 1+F clean-up goes straight to CONF 0 at S', P.cleanupSpeeds(a320, 65000, '1+F').steps.map(s => s.to).join(','), '0');
+within('A320 clean speed is green dot', P.cleanupSpeeds(a320, 65000, '1+F').vClean, P.greenDot(65000) - 0.1, P.greenDot(65000) + 0.1);
+const dep = { mass: 70000, flap: '5', elevFt: 0, qnh: 1013.25, oatC: 15, headwind: 0 };
+const n1 = P.departureProfile(b738, Object.assign({ proc: 'nadp1' }, dep)), n2 = P.departureProfile(b738, Object.assign({ proc: 'nadp2' }, dep));
+within('B738 all-engine climb gradient (%)', n1.gradients.aeo * 100, 12, 25);
+within('NADP 1 thrust reduction height (ft)', n1.events.find(e => e.key === 'thrRed').h, 800, 900);
+within('NADP 1 accelerates at 3000 ft', n1.events.find(e => e.key === 'acc').h, 3000, 3100);
+within('NADP 2 accelerates at 800 ft', n2.events.find(e => e.key === 'acc').h, 800, 900);
+eq('NADP 1 is higher over the close-in point (3.5 NM)', n1.at(3.5).h > n2.at(3.5).h + 300, true);
+eq('NADP 2 burns less fuel to 4000 ft / 250 kt', n2.fuel < n1.fuel, true);
+const eo = P.departureProfile(b738, Object.assign({}, dep, { mass: 79000, proc: 'eo', accFt: 1000 }));
+within('B738 MTOW engine-out 2nd segment gradient (%) ≥ 2.4', eo.gradients.second * 100, 2.4, 6);
+within('B738 engine-out final segment gradient (%) ≥ 1.2', eo.gradients.final * 100, 1.2, 8);
+within('Engine-out acceleration is level (ft)', eo.events.find(e => e.key === 'mct').h - eo.events.find(e => e.key === 'acc').h, -1, 5);
+eq('Engine-out take-off thrust inside the 10-minute limit', eo.events.find(e => e.key === 'mct').t < 600, true);
+eq('Hot and high at MTOW: cannot climb on one engine', P.departureProfile(b738, Object.assign({}, dep, { mass: 79000, proc: 'eo', elevFt: 5400, oatC: 40 })).cannotClimb, true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
