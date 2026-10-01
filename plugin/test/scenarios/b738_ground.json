@@ -1,0 +1,345 @@
+{
+"sim/aircraft/view/acf_ICAO": {
+"t": "b",
+"v": "B738"
+},
+"sim/aircraft/view/acf_descrip": {
+"t": "b",
+"v": "Boeing 737-800"
+},
+"sim/aircraft/view/acf_tailnum": {
+"t": "b",
+"v": "N738XP"
+},
+"sim/aircraft/view/acf_author": {
+"t": "b",
+"v": "Laminar Research"
+},
+"sim/aircraft/engine/acf_num_engines": {
+"t": "i",
+"v": 2
+},
+"sim/aircraft/prop/acf_en_type": {
+"t": "vi",
+"v": [
+7,
+7,
+7,
+7,
+7,
+7,
+7,
+7
+]
+},
+"sim/aircraft/weight/acf_m_empty": {
+"t": "f",
+"v": 41413.0
+},
+"sim/aircraft/weight/acf_m_max": {
+"t": "f",
+"v": 79015.8
+},
+"sim/aircraft/weight/acf_m_fuel_tot": {
+"t": "f",
+"v": 20894.0
+},
+"sim/aircraft/view/acf_Vso": {
+"t": "f",
+"v": 112.0
+},
+"sim/aircraft/view/acf_Vs": {
+"t": "f",
+"v": 140.0
+},
+"sim/aircraft/view/acf_Vfe": {
+"t": "f",
+"v": 162.0
+},
+"sim/aircraft/view/acf_Vno": {
+"t": "f",
+"v": 340.0
+},
+"sim/aircraft/view/acf_Vne": {
+"t": "f",
+"v": 340.0
+},
+"sim/aircraft/view/acf_Mmo": {
+"t": "f",
+"v": 0.82
+},
+"sim/aircraft/overflow/acf_Vle": {
+"t": "f",
+"v": 270.0
+},
+"sim/aircraft/overflow/acf_Vmca": {
+"t": "f",
+"v": 0.0
+},
+"sim/aircraft/overflow/acf_Vyse": {
+"t": "f",
+"v": 0.0
+},
+"sim/aircraft/gear/acf_gear_retract": {
+"t": "i",
+"v": 1
+},
+"sim/aircraft/controls/acf_flap_detents": {
+"t": "i",
+"v": 8
+},
+"sim/version/xplane_internal_version": {
+"t": "i",
+"v": 121400
+},
+"sim/flightmodel/position/latitude": {
+"t": "d",
+"v": 59.4133
+},
+"sim/flightmodel/position/longitude": {
+"t": "d",
+"v": 24.8328
+},
+"sim/flightmodel/position/elevation": {
+"t": "d",
+"v": 41.4288
+},
+"sim/flightmodel/position/y_agl": {
+"t": "f",
+"v": 1.5
+},
+"sim/cockpit2/gauges/indicators/altitude_ft_pilot": {
+"t": "f",
+"v": 131.0
+},
+"sim/flightmodel2/position/pressure_altitude": {
+"t": "f",
+"v": 272.75
+},
+"sim/cockpit2/gauges/indicators/airspeed_kts_pilot": {
+"t": "f",
+"v": 0.0
+},
+"sim/cockpit2/gauges/indicators/calibrated_airspeed_kts_pilot": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/position/true_airspeed": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/position/groundspeed": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/misc/machno": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/position/vh_ind_fpm": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/position/psi": {
+"t": "f",
+"v": 262.0
+},
+"sim/flightmodel/position/mag_psi": {
+"t": "f",
+"v": 255.0
+},
+"sim/flightmodel/position/hpath": {
+"t": "f",
+"v": 262.0
+},
+"sim/flightmodel/position/theta": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/position/phi": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel2/position/alpha": {
+"t": "f",
+"v": 0.0
+},
+"sim/weather/aircraft/temperature_ambient_deg_c": {
+"t": "f",
+"v": 12.0
+},
+"sim/cockpit2/temperature/outside_air_temp_degc": {
+"t": "f",
+"v": 12.0
+},
+"sim/weather/aircraft/temperature_leadingedge_deg_c": {
+"t": "f",
+"v": 12.0
+},
+"sim/weather/aircraft/qnh_pas": {
+"t": "f",
+"v": 100800.0
+},
+"sim/weather/aircraft/barometer_current_pas": {
+"t": "f",
+"v": 100330.0
+},
+"sim/cockpit2/gauges/actuators/barometer_setting_in_hg_pilot": {
+"t": "f",
+"v": 29.766211216073753
+},
+"sim/weather/aircraft/wind_now_direction_degt": {
+"t": "f",
+"v": 250.0
+},
+"sim/weather/aircraft/wind_now_speed_msc": {
+"t": "f",
+"v": 5.14444
+},
+"sim/cockpit2/gauges/indicators/wind_heading_deg_mag": {
+"t": "f",
+"v": 243.0
+},
+"sim/cockpit2/gauges/indicators/wind_speed_kts": {
+"t": "f",
+"v": 10.0
+},
+"sim/weather/rho": {
+"t": "f",
+"v": 1.227
+},
+"sim/weather/aircraft/altimeter_temperature_error": {
+"t": "f",
+"v": 60.0
+},
+"sim/weather/aircraft/visibility_reported_sm": {
+"t": "f",
+"v": 10.0
+},
+"sim/weather/region/runway_friction": {
+"t": "f",
+"v": 0.0
+},
+"sim/flightmodel/weight/m_total": {
+"t": "f",
+"v": 68500.0
+},
+"sim/flightmodel/weight/m_fuel_total": {
+"t": "f",
+"v": 9800.0
+},
+"sim/flightmodel/weight/m_fixed": {
+"t": "f",
+"v": 17287.0
+},
+"sim/cockpit2/engine/indicators/fuel_flow_kg_sec": {
+"t": "vf",
+"v": [
+0.08,
+0.08,
+0,
+0,
+0,
+0,
+0,
+0
+]
+},
+"sim/cockpit2/engine/indicators/N1_percent": {
+"t": "vf",
+"v": [
+21.5,
+21.5,
+0,
+0,
+0,
+0,
+0,
+0
+]
+},
+"sim/cockpit2/controls/flap_handle_request_ratio": {
+"t": "f",
+"v": 0.375
+},
+"sim/cockpit2/controls/flap_handle_deploy_ratio": {
+"t": "f",
+"v": 0.375
+},
+"sim/cockpit2/controls/gear_handle_down": {
+"t": "i",
+"v": 1
+},
+"sim/flightmodel/failures/onground_any": {
+"t": "i",
+"v": 1
+},
+"sim/time/paused": {
+"t": "i",
+"v": 0
+},
+"sim/time/zulu_time_sec": {
+"t": "f",
+"v": 43200.000438928604
+},
+"sim/cockpit2/radios/indicators/gps_dme_distance_nm": {
+"t": "f",
+"v": 179.99994032123348
+},
+"sim/cockpit2/radios/indicators/gps_bearing_deg_mag": {
+"t": "f",
+"v": 76.4993550870628
+},
+"sim/cockpit2/radios/indicators/fms_distance_to_tod_pilot": {
+"t": "f",
+"v": 79.99994032123347
+},
+"sim/cockpit2/radios/indicators/landing_alt_pilot": {
+"t": "f",
+"v": 131.0
+},
+"sim/aircraft2/metadata/is_airliner": {
+"t": "i",
+"v": 1
+},
+"sim/aircraft2/metadata/is_general_aviation": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_helicopter": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_glider": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_military": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_cargo": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_experimental": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_ultralight": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_seaplane": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_vtol": {
+"t": "i",
+"v": 0
+},
+"sim/aircraft2/metadata/is_sci_fi": {
+"t": "i",
+"v": 0
+}
+}

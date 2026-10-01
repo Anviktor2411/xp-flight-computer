@@ -1,0 +1,9 @@
+__pycache__/
+build/
+dist/
+*.spec
+xpfc_config.json
+user_profiles.json
+plugin/build/
+__pycache__/
+*.pyc
